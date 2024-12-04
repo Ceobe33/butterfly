@@ -192,8 +192,17 @@ wordcount:
 # 3: auto_excerpt (default)
 # false: do not show the article introduction
 index_post_content:
-  method: 2
+  method: 1
   length: 500 # if you set method to 2 or 3, the length need to config
+
+index_layout: 1
+# 1	Cover on the left, info on the right
+# 2	Cover on the right, info on the left
+# 3	Cover and info alternate between left and right
+# 4	Cover on top, info on the bottom
+# 5	Info displayed on the cover
+# 6	Masonry layout - Cover on top, info on the bottom
+# 7	Masonry layout - Info displayed on the cover
 
 # anchor
 # when you scroll in post, the URL will update according to header id.
@@ -241,6 +250,28 @@ related_post:
   enable: true
   limit: 6 # Number of posts displayed
   date_type: created # or created or updated 文章日期顯示創建日或者更新日
+
+# refers https://github.com/sergeyzwezdin/hexo-related-posts
+related_posts:
+    enabled: true
+    enable_env_name: prod
+    filter_threshold: 0.3
+    related_count: 3
+    weight:
+        title: 0.05
+        description: 0.05
+        keywords: 0.03
+        tags: 0.005
+        categories: 0.01
+        text: 1
+    stemmers:
+      - en
+      - ru
+    reserved:
+      - asp.net
+      - vs.net
+      - ado.net
+      - .net
 
 # figcaption (圖片描述文字)
 photofigcaption: false
