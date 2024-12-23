@@ -252,26 +252,26 @@ related_post:
   date_type: created # or created or updated 文章日期顯示創建日或者更新日
 
 # refers https://github.com/sergeyzwezdin/hexo-related-posts
-# related_posts:
-#     enabled: true
-#     enable_env_name: prod
-#     filter_threshold: 0.3
-#     related_count: 3
-#     weight:
-#         title: 0.05
-#         description: 0.05
-#         keywords: 0.03
-#         tags: 0.005
-#         categories: 0.01
-#         text: 1
-#     stemmers:
-#       - en
-#       - ru
-#     reserved:
-#       - asp.net
-#       - vs.net
-#       - ado.net
-#       - .net
+related_posts:
+    enabled: true
+    enable_env_name: prod
+    filter_threshold: 0.3
+    related_count: 3
+    weight:
+        title: 0.05
+        description: 0.05
+        keywords: 0.03
+        tags: 0.005
+        categories: 0.01
+        text: 1
+    stemmers:
+      - en
+      - ru
+    reserved:
+      - asp.net
+      - vs.net
+      - ado.net
+      - .net
 
 # figcaption (圖片描述文字)
 photofigcaption: false
