@@ -1,0 +1,139 @@
+extends includes/layout.pug
+
+block content
+  .daily-page
+    .daily-header
+      h1 📖 每日推荐
+      .daily-controls
+        label(for="recommend-count") 显示数量:
+        select#recommend-count
+          option(value="1") 1 篇
+          option(value="3" selected) 3 篇
+          option(value="5") 5 篇
+          option(value="10") 10 篇
+    -
+      const recommends = daily_recommend();
+    .recommend-list#recommend-list
+      if recommends && recommends.length
+        each post, index in recommends
+          article.recommend-card(data-index=index)
+            h2
+              a(href=url_for(post.path))= post.title || '无标题'
+            p.excerpt= strip_html(post.excerpt || post.content).substring(0, 140) + '...'
+            .meta
+              time= date(post.date, 'YYYY-MM-DD')
+              if post.tags && post.tags.length
+                .tags
+                  each tag in post.tags.data
+                    a.tag-pill(href=url_for(tag.path))= tag.name
+      else
+        .empty-state 暂无符合条件的推荐文章 😴
+
+  style.
+    .daily-page {
+      padding: 24px 0;
+    }
+    .daily-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .daily-controls select {
+      padding: 4px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(150,150,150,0.3);
+      background: rgba(255,255,255,0.4);
+      backdrop-filter: blur(6px);
+    }
+    .recommend-card {
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 18px;
+      padding: 22px 26px;
+      margin-bottom: 22px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+      transition: transform .25s ease, box-shadow .25s ease;
+    }
+    .recommend-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.14);
+    }
+    .recommend-card h2 {
+      margin: 0 0 10px;
+      font-size: 1.25rem;
+    }
+    .recommend-card .excerpt {
+      opacity: 0.85;
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+    .recommend-card .meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.85rem;
+      opacity: 0.7;
+    }
+    .tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tag-pill {
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: rgba(120,150,255,0.18);
+      border: 1px solid rgba(120,150,255,0.35);
+      font-size: 0.78rem;
+      transition: background .2s ease;
+    }
+    .tag-pill:hover {
+      background: rgba(120,150,255,0.32);
+    }
+    [data-theme="dark"] .recommend-card {
+      background: rgba(30,30,40,0.35);
+      border-color: rgba(255,255,255,0.08);
+    }
+    [data-theme="dark"] .tag-pill {
+      background: rgba(120,150,255,0.15);
+      border-color: rgba(120,150,255,0.3);
+    }
+
+  script.
+    (function() {
+      function setCookie(name, value, days) {
+        var d = new Date();
+        d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+        document.cookie = name + "=" + encodeURIComponent(value) + ";expires=" + d.toUTCString() + ";path=/";
+      }
+      function getCookie(name) {
+        var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+        return match ? decodeURIComponent(match[2]) : '';
+      }
+
+      var select = document.getElementById('recommend-count');
+      var cards = document.querySelectorAll('.recommend-card');
+      if (!select) return;
+
+      // 读取 cookie,默认 3 篇
+      var saved = getCookie('daily_recommend_count') || '3';
+      if ([1, 3, 5, 10].indexOf(parseInt(saved, 10)) > -1) {
+        select.value = saved;
+      }
+
+      function refresh() {
+        var count = parseInt(select.value, 10);
+        cards.forEach(function(card, idx) {
+          card.style.display = idx < count ? '' : 'none';
+        });
+        setCookie('daily_recommend_count', count, 365);
+      }
+
+      select.addEventListener('change', refresh);
+      refresh(); // 页面加载时立即按 cookie 中的数量生效
+    })();
