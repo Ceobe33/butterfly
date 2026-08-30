@@ -6,11 +6,12 @@ block content
       h1 📖 每日推荐
       .daily-controls
         label(for="recommend-count") 显示数量:
+        -
+          const dailyConf = config.daily_recommend || { default_count: 3 };
+          const countOptions = [1, 3, 5, 10];
         select#recommend-count
-          option(value="1") 1 篇
-          option(value="3" selected) 3 篇
-          option(value="5") 5 篇
-          option(value="10") 10 篇
+          each opt in countOptions
+            option(value=opt selected=(opt === dailyConf.default_count))= opt + ' 篇'
     -
       const recommends = daily_recommend();
     .recommend-list#recommend-list
@@ -106,6 +107,8 @@ block content
 
   script.
     (function() {
+      //- 默认 3 篇
+      var DEFAULT_COUNT = #{dailyConf.default_count || 3};
       function setCookie(name, value, days) {
         var d = new Date();
         d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
@@ -120,8 +123,8 @@ block content
       var cards = document.querySelectorAll('.recommend-card');
       if (!select) return;
 
-      // 读取 cookie,默认 3 篇
-      var saved = getCookie('daily_recommend_count') || '3';
+      // 读取 cookie,
+      var saved = getCookie('daily_recommend_count') || String(DEFAULT_COUNT);
       if ([1, 3, 5, 10].indexOf(parseInt(saved, 10)) > -1) {
         select.value = saved;
       }

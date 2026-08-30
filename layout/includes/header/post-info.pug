@@ -1,11 +1,20 @@
 - let comments = theme.comments
+- var link = (typeof page.url === 'string' && page.url.trim()) ? page.url.trim() : (typeof page.copyright_url === 'string' && page.copyright_url.trim()) ? page.copyright_url.trim() : null
+
 #post-info
-  h1.post-title= page.title || _p('no_title')
+  h1.post-title
+    if link
+      a(href=link target='_blank' rel='noopener')= page.title || _p('no_title')
+        i.fas.fa-external-link
+    else
+      span.post-title-text= page.title || _p('no_title')
     if theme.post_edit.enable
       a.post-edit-link(href=theme.post_edit.url + page.source title=_p('post.edit') target="_blank")
         i.fas.fa-pencil-alt
         
   #post-meta
+    if (page.description)
+      p= page.description
     .meta-firstline
       if (theme.post_meta.post.date_type)
         span.post-meta-date
@@ -38,6 +47,13 @@
 
     .meta-secondline
       - let postWordcount = theme.wordcount.enable && (theme.wordcount.post_wordcount || theme.wordcount.min2read)
+      span.post-meta-separator |
+      i.far.fa-edit.fa-fw.post-meta-icon
+      span.post-meta-label= _p('post.copyright.author') + ':'
+      if (page.author)
+        span.author= page.author
+      if (page.copyright_author)
+        span.author= page.copyright_author
       if (postWordcount)
         span.post-meta-separator |
         span.post-meta-wordcount
