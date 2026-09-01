@@ -54,5 +54,6 @@ hexo.extend.helper.register('findArchiveLength', function (func) {
   })
 
   const name = month ? day ? `${year}-${month}-${day}` : `${year}-${month}` : year
-  return data.find(item => item.name === name).count
+  const matched = data.find(item => item.name === name)
+  return matched ? matched.count : 0
 })
