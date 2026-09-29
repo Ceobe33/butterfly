@@ -16,12 +16,19 @@ script(src=url_for(theme.asset.pjax))
 script.
   let pjaxSelectors = !{JSON.stringify(pjaxSelectors)}
 
+  // scrollRestoration 打开后，Pjax 会把离开页面时的滚动位置写进 history.state，
+  // popstate（浏览器前进/后退）时再恢复到该位置，否则返回后一律停在页面顶部
   var pjax = new Pjax({
     elements: '!{pjaxExclude}',
     selectors: pjaxSelectors,
     cacheBust: false,
     analytics: !{theme.google_analytics ? true : false},
-    scrollRestoration: false
+    scrollRestoration: true
+  })
+
+  let pjaxRestoreScrollPos = null
+  window.addEventListener('popstate', function (e) {
+    pjaxRestoreScrollPos = (e.state && e.state.scrollPos) ? e.state.scrollPos : null
   })
 
   document.addEventListener('pjax:send', function () {
@@ -78,6 +85,14 @@ script.
     typeof Prism === 'object' && Prism.highlightAll()
 
     typeof preloader === 'object' && preloader.endLoading()
+
+    // 事后校正：恢复时图片/懒加载资源可能还没撑开文档高度，导致落点偏上
+    if (pjaxRestoreScrollPos) {
+      const pos = pjaxRestoreScrollPos
+      pjaxRestoreScrollPos = null
+      window.scrollTo(pos[0], pos[1])
+      setTimeout(() => window.scrollTo(pos[0], pos[1]), 200)
+    }
   })
 
   document.addEventListener('pjax:error', (e) => {
