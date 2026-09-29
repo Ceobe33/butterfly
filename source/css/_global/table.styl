@@ -1,0 +1,64 @@
+/* Markdown 表格：按内容宽度排布，超出容器时表格自身横向滚动
+ *
+ * 主题默认 table { width: 100% }，表格被压进容器宽度，单元格只能不停换行。
+ * 这里把表格变成自己的滚动容器（display: block + max-width: 100%），
+ * 宽度由内容决定，单元格不换行，不再受屏幕宽度限制。
+ * 不用 .table-wrap 做滚动容器：主题只在首次加载时补包裹层，pjax 跳转后没有，
+ * 手机上会失效。
+ * 排除 figure.highlight 内的代码高亮表格，避免影响代码块宽度。
+ */
+#article-container :not(.highlight) > table {
+    display: block;
+    width: auto;
+    /* 支持 max-content 的浏览器按内容宽度撑开，不支持的回落到上面的 auto */
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+#article-container :not(.highlight) > table th,
+#article-container :not(.highlight) > table td {
+    white-space: nowrap;
+}
+
+/* 左右阴影：提示两侧还有内容可以滑动，显隐由 /js/tableShadow.js 控制 */
+.table-shadow-wrap {
+    position: relative;
+}
+
+.table-shadow-wrap::before,
+.table-shadow-wrap::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 24px;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity .25s;
+    pointer-events: none;
+}
+
+.table-shadow-wrap::before {
+    left: 0;
+    background: linear-gradient(to right, rgba(0, 0, 0, .18), rgba(0, 0, 0, 0));
+}
+
+.table-shadow-wrap::after {
+    right: 0;
+    background: linear-gradient(to left, rgba(0, 0, 0, .18), rgba(0, 0, 0, 0));
+}
+
+.table-shadow-wrap.can-scroll-left::before,
+.table-shadow-wrap.can-scroll-right::after {
+    opacity: 1;
+}
+
+[data-theme='dark'] .table-shadow-wrap::before {
+    background: linear-gradient(to right, rgba(0, 0, 0, .55), rgba(0, 0, 0, 0));
+}
+
+[data-theme='dark'] .table-shadow-wrap::after {
+    background: linear-gradient(to left, rgba(0, 0, 0, .55), rgba(0, 0, 0, 0));
+}

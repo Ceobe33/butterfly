@@ -1020,6 +1020,6 @@ CDN:
 # see scripts/filters/daily_recommend.js
 daily_recommend:
   # 预取的最大篇数，前端下拉框最多可选到这个数量
-  max_count: 9
+  max_count: 10
   # 前端默认展示的篇数
   default_count: 3

@@ -19,6 +19,8 @@
   - `scripts/tag/tolerant_post_link.js` — `post_link` 找不到文章时回落占位链接而非构建中断
 - `daily_recommend` 配置项（`max_count` / `default_count`），读取主题配置 `hexo.theme.config`；
   主题 `_config.yml` 提供默认值，站点侧用根 `_config.butterfly.yml` 覆盖
+- 文章表格不再被容器宽度限制：`source/css/_global/table.styl` 让表格按内容宽度排布、单元格不换行、
+  超出部分由表格自身横向滚动；`source/js/tableShadow.js` 在还有内容的一侧显示阴影
 
 ### Fixed
 

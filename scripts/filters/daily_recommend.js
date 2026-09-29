@@ -6,10 +6,11 @@ const path = require('path');
 // ===== 可调整参数 =====
 // 前端下拉框最大可选的推荐篇数,预取时就按这个数量抽取,
 // 前端 JS 再根据用户实际选择的数量隐藏多余部分。
-// 配置来自 butterfly 主题配置(站点根 _config.butterfly.yml 覆盖主题 _config.yml)
-const dailyConf = (hexo.theme.config && hexo.theme.config.daily_recommend) || {};
-const MAX_COUNT = dailyConf.max_count || 9;
-const DEFAULT_COUNT = dailyConf.default_count || 3;
+// 配置来自 butterfly 主题配置(站点根 _config.butterfly.yml 覆盖主题 _config.yml)。
+// 注意:主题脚本是在 hexo 合并站点级 _config.butterfly.yml 之前加载的,
+// 所以这里必须在使用时读取,不能在模块顶层一次性取走。
+const dailyConf = () => (hexo.theme.config && hexo.theme.config.daily_recommend) || {};
+const MAX_COUNT = () => dailyConf().max_count || 9;
 
 // 数据持久化到 source/_data 下,hexo clean 不会清掉这个目录
 const DATA_DIR = path.join(hexo.source_dir, '_data');
@@ -77,16 +78,16 @@ function getDailyRecommend(posts) {
     let pool = allSlugs.filter(slug => !data.history.includes(slug));
 
     // 需求2:剩余未展示的文章数不够填满当天展示上限,直接清空历史、当新一轮重新抽
-    if (pool.length < MAX_COUNT) {
+    if (pool.length < MAX_COUNT()) {
       data.history = [];
       pool = [...allSlugs];
     }
 
-    const picked = shuffle(pool).slice(0, Math.min(MAX_COUNT, pool.length));
+    const picked = shuffle(pool).slice(0, Math.min(MAX_COUNT(), pool.length));
 
     // 需求1:只有真正凑够展示上限时才计入历史,
     // 避免文章总数本身不足 MAX_COUNT 时历史列表被提前写满、失去轮换意义
-    if (picked.length >= MAX_COUNT) {
+    if (picked.length >= MAX_COUNT()) {
       data.history.push(...picked);
     }
     console.log('[daily-recommend] pool.length:', pool.length, ' all slugs:', allSlugs.length, ' posts:', posts.length);
