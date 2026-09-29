@@ -1011,3 +1011,15 @@ CDN:
     # prismjs_autoloader:
     # artalk_js:
     # artalk_css:
+
+# Custom scripts (主题自带脚本的配置)
+# see scripts/
+# --------------------------------------
+
+# Daily Recommend (每日推荐)
+# see scripts/filters/daily_recommend.js
+daily_recommend:
+  # 预取的最大篇数，前端下拉框最多可选到这个数量
+  max_count: 9
+  # 前端默认展示的篇数
+  default_count: 3
