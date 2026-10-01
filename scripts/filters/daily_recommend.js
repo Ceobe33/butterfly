@@ -10,6 +10,8 @@ const path = require('path');
 // 注意:主题脚本是在 hexo 合并站点级 _config.butterfly.yml 之前加载的,
 // 所以这里必须在使用时读取,不能在模块顶层一次性取走。
 const dailyConf = () => (hexo.theme.config && hexo.theme.config.daily_recommend) || {};
+// 总开关，不写默认开启。关闭后不抽取、不写数据文件、daily 页面也不生成
+const ENABLE = () => dailyConf().enable !== false;
 const MAX_COUNT = () => dailyConf().max_count || 9;
 
 // 数据持久化到 source/_data 下,hexo clean 不会清掉这个目录
@@ -100,9 +102,21 @@ function getDailyRecommend(posts) {
   return data.today || [];
 }
 
+// 开关关闭时把 layout 为 daily 的页面从 locals.pages 里摘掉。hexo 的 page
+// generator 是按 locals.pages 逐条产出路由的,摘掉后 /daily/ 就不会生成(访问 404)。
+// 注意:这里读到的 Query 要在外面先取好,否则新 getter 里再 get('pages') 会调到自己。
+hexo.extend.filter.register('before_generate', function () {
+  if (ENABLE()) return;
+
+  const pages = hexo.locals.get('pages');
+  hexo.locals.set('pages', () => pages.filter(page => page.layout !== 'daily'));
+});
+
 // 生成前预取一次,保证同一次 generate 过程里所有页面拿到的数据一致,
 // 且不会因为多次调用助手函数而被重复抽取。
 hexo.extend.filter.register('after_generate', function (locals) {
+  if (!ENABLE()) return;
+
   const posts = hexo.locals.get('posts').toArray();
   // console.log('[daily-recommend] eligible posts:', posts.filter(isEligible).length, 'MAX_COUNT:', MAX_COUNT);
   getDailyRecommend(posts);
@@ -111,6 +125,8 @@ hexo.extend.filter.register('after_generate', function (locals) {
 // 模板里用 daily_recommend() 拿到今天预取好的全部文章对象(最多 MAX_COUNT 篇),
 // 具体展示几篇由页面前端 JS 按用户选择隐藏多余部分,不需要在这里再传 count。
 hexo.extend.helper.register('daily_recommend', function () {
+  if (!ENABLE()) return [];
+
   const posts = hexo.locals.get('posts').toArray();
   const eligiblePosts = posts.filter(isEligible);
   const todaySlugs = getDailyRecommend(posts);

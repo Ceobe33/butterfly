@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `daily_recommend.enable` 总开关（默认 `true`）。关闭后不再抽取推荐、不写 `source/_data/daily-recommend.json`，
+  且 `layout: daily` 的页面会从 `locals.pages` 中移除、不再生成
+
 ## [4.5.0] - 2026-09-29
 
 ### Added
