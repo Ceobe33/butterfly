@@ -93,11 +93,125 @@ mathjax:
   enable: false
   per_page: false
 
-# KaTeX
+# KaTeX parser
+#
+# This configuration controls the Markdown -> KaTeX parsing
+# implemented by scripts/helpers/katex.js.
 katex:
   enable: false
   per_page: false
   hide_scrollbar: true
+
+  # ------------------------------------------------------------
+  # Math delimiters
+  # ------------------------------------------------------------
+  delimiters:
+    # $$ ... $$
+    block_dollar: true
+
+    # $ ... $
+    inline_dollar: true
+
+    # \[ ... \]
+    block_bracket: true
+
+    # \( ... \)
+    inline_parenthesis: true
+
+  # ------------------------------------------------------------
+  # Inline $...$ behavior
+  # ------------------------------------------------------------
+  inline_dollar:
+    # Whether "$ foo $" is allowed.
+    #
+    # false:
+    #   $foo$       -> math
+    #   $ foo $     -> text
+    #
+    # true:
+    #   $ foo $     -> math
+    allow_space: false
+
+    # Whether a single-line "$...$" expression may contain
+    # another "$" escaped as "\$".
+    #
+    # Usually leave this enabled.
+    allow_escaped_dollar: true
+
+  # ------------------------------------------------------------
+  # KaTeX rendering options
+  # ------------------------------------------------------------
+  render:
+    # If false, invalid KaTeX is rendered as red/error text
+    # instead of aborting the Hexo build.
+    throw_on_error: false
+
+    # KaTeX error color.
+    error_color: "#cc0000"
+
+    # KaTeX strict mode.
+    #
+    # false:
+    #   do not report strict-mode warnings
+    #
+    # "warn":
+    #   report warnings
+    #
+    # "ignore":
+    #   ignore strict-mode issues
+    strict: false
+
+    # Allow commands such as \href / \url / \includegraphics
+    # that KaTeX considers potentially unsafe.
+    #
+    # false is recommended unless you trust all Markdown content.
+    trust: false
+
+    # KaTeX output mode:
+    #
+    # html
+    # mathml
+    # htmlAndMathml
+    output: "htmlAndMathml"
+
+    # Display equations aligned to the left.
+    fleqn: false
+
+    # Put equation numbers on the left.
+    leqno: false
+
+    # Whether \color changes text color.
+    color_is_text_color: false
+
+    # Maximum user-specified size in em.
+    max_size: "Infinity"
+
+    # Maximum macro expansion depth.
+    max_expand: 1000
+
+    # Allow macros to affect the global group.
+    global_group: false
+
+    # Minimum thickness of \rule-like elements.
+    min_rule_thickness: 0
+
+    # ----------------------------------------------------------
+    # Custom macros
+    # ----------------------------------------------------------
+    #
+    # Example:
+    #
+    # macros:
+    #   "\\R": "\\mathbb{R}"
+    #   "\\N": "\\mathbb{N}"
+    #   "\\C": "\\mathbb{C}"
+    #   "\\vect": "\\mathbf{#1}"
+    #
+    # Then:
+    #
+    # $x \in \R$
+    #
+    macros:
 
 # Image (圖片設置)
 # --------------------------------------
@@ -215,7 +329,7 @@ anchor: false
 toc:
   post: true
   page: true
-  number: true
+  number: false
   expand: true
   style_simple: true # for post
 
@@ -243,7 +357,7 @@ post_edit:
   enable: true
   # url: https://github.com/user-name/repo-name/edit/branch-name/subdirectory-name/
   # For example: https://github.com/jerryc127/butterfly.js.org/edit/main/source/
-  url: https://github.dev/Coebe/aaroncode/tree/main/source/
+  url: https://github.dev/Ceobe33/aaroncode/tree/main/source/
 
 # Related Articles
 related_post:
@@ -721,7 +835,7 @@ aside:
       enable: false
       icon: fab fa-github
       text: Follow Me
-      link: https://github.com/Coebe
+      link: https://github.com/Ceobe33
   card_announcement:
     enable: true
     content: It's my knowledge base, issue note
