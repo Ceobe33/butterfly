@@ -10,4 +10,10 @@ script.
 
     }
   }
-  window.addEventListener('load',preloader.endLoading())
+  // 原写法 addEventListener('load', preloader.endLoading()) 是立即调用：
+  // 传进 addEventListener 的是返回值 undefined，load 回调根本没注册。
+  // 加上前面还有阻塞式的第三方 CDN <script>，解析被卡住时这段脚本迟迟不执行，
+  // loading 界面就一直不消失。这里改为即时收起 + DOMContentLoaded/load 双兜底。
+  preloader.endLoading()
+  document.addEventListener('DOMContentLoaded', preloader.endLoading)
+  window.addEventListener('load', preloader.endLoading)

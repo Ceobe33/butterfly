@@ -6,28 +6,32 @@ div
   if theme.translate.enable
     script(src=url_for(theme.asset.translate))
 
+  //- 第三方 CDN 脚本一律 defer：否则会阻塞 HTML 解析，
+  //- 排在它们后面的 loading-js 收起脚本迟迟不执行，页面卡在 loading 界面。
+  //- defer 之间保持相对顺序，且都在 DOMContentLoaded 之前执行，main.js 的事件回调不受影响。
+
   if theme.medium_zoom
-    script(src=url_for(theme.asset.medium_zoom))
+    script(defer src=url_for(theme.asset.medium_zoom))
   else if theme.fancybox
-    script(src=url_for(theme.asset.fancybox_v4))
+    script(defer src=url_for(theme.asset.fancybox_v4))
 
   if theme.instantpage
     script(src=url_for(theme.asset.instantpage), type='module')
 
   if theme.lazyload.enable
-    script(src=url_for(theme.asset.lazyload))
+    script(defer src=url_for(theme.asset.lazyload))
 
   if theme.snackbar.enable
-    script(src=url_for(theme.asset.snackbar))
+    script(defer src=url_for(theme.asset.snackbar))
 
   if theme.pangu.enable
     != partial("includes/third-party/pangu.pug", {}, { cache: true })
 
   //- search
   if theme.algolia_search.enable
-    script(src=url_for(theme.asset.algolia_search_v4))
-    script(src=url_for(theme.asset.instantsearch_v4))
-    script(src=url_for(theme.asset.algolia_js))
+    script(defer src=url_for(theme.asset.algolia_search_v4))
+    script(defer src=url_for(theme.asset.instantsearch_v4))
+    script(defer src=url_for(theme.asset.algolia_js))
   else if theme.local_search.enable
     script(src=url_for(theme.asset.local_search))
 
