@@ -1,6 +1,33 @@
 'use strict';
 
-const katex = require('katex');
+/**
+ * katex is an optional dependency: it is only needed when KaTeX
+ * rendering is actually turned on. Requiring it at load time made the
+ * whole script fail ("Script load failed") on sites where katex is
+ * disabled or not installed, so it is resolved lazily instead.
+ */
+let katex_module = null;
+let katex_missing = false;
+
+function get_katex() {
+  if (katex_module) {
+    return katex_module;
+  }
+
+  if (katex_missing) {
+    return null;
+  }
+
+  try {
+    katex_module = require('katex');
+  } catch (err) {
+    katex_missing = true;
+    console.warn('[butterfly] theme.katex is enabled, but the "katex" package is not installed - math rendering is skipped. Run: npm install katex');
+    return null;
+  }
+
+  return katex_module;
+}
 
 /**
  * ============================================================
@@ -111,6 +138,12 @@ function parse_max_size(value) {
  */
 
 function render_math(text, display_mode) {
+  const katex = get_katex();
+
+  if (!katex) {
+    return text;
+  }
+
   return katex.renderToString(
     text.trim(),
     {
@@ -446,6 +479,10 @@ hexo.extend.filter.register(
 
   function (extensions) {
     if (config.enable === false) {
+      return;
+    }
+
+    if (!get_katex()) {
       return;
     }
 
