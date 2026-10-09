@@ -47,15 +47,21 @@
 
     .meta-secondline
       - let postWordcount = theme.wordcount.enable && (theme.wordcount.post_wordcount || theme.wordcount.min2read)
-      span.post-meta-separator |
-      i.far.fa-edit.fa-fw.post-meta-icon
-      span.post-meta-label= _p('post.copyright.author') + ':'
       if (page.author)
+        i.far.fa-edit.fa-fw.post-meta-icon
+        span.post-meta-label= _p('post.copyright.author') + ':'
         span.author= page.author
       if (page.copyright_author)
+        i.far.fa-edit.fa-fw.post-meta-icon
+        span.post-meta-label= _p('post.copyright.author') + ':'
         span.author= page.copyright_author
-      if (postWordcount)
+      if (page.account)
         span.post-meta-separator |
+        i.far.fa-circle-user.fa-fw.post-meta-icon
+        span.post-meta-label= _p('post.copyright.account') + ':'
+        span.account= page.account
+      br
+      if (postWordcount)
         span.post-meta-wordcount
           if theme.wordcount.post_wordcount
             i.far.fa-file-word.fa-fw.post-meta-icon
