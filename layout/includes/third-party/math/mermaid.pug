@@ -1,26 +1,51 @@
 script.
   (() => {
     const $mermaidWrap = document.querySelectorAll('#article-container .mermaid-wrap')
-    if ($mermaidWrap.length) {
-      window.runMermaid = () => {
-        window.loadMermaid = true
-        const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? '!{theme.mermaid.theme.dark}' : '!{theme.mermaid.theme.light}'
+    if (!$mermaidWrap.length) return
 
-        Array.from($mermaidWrap).forEach((item, index) => {
-          const mermaidSrc = item.firstElementChild
-          const mermaidThemeConfig = '%%{init:{ \'theme\':\'' + theme + '\'}}%%\n'
-          const mermaidID = 'mermaid-' + index
-          const mermaidDefinition = mermaidThemeConfig + mermaidSrc.textContent
-          mermaid.mermaidAPI.render(mermaidID, mermaidDefinition, (svgCode) => {
-            mermaidSrc.insertAdjacentHTML('afterend', svgCode)
-          })
-        })
+    const renderAll = async (theme) => {
+      // mermaid v10+ 移除了回调式的 mermaidAPI.render(id, def, cb)，
+      // render() 改为返回 Promise<{ svg, bindFunctions }>
+      mermaid.initialize({ startOnLoad: false, theme })
+
+      for (let index = 0; index < $mermaidWrap.length; index++) {
+        const item = $mermaidWrap[index]
+        const mermaidSrc = item.firstElementChild
+        const mermaidID = 'mermaid-' + index
+        const mermaidDefinition = '%%{init:{ \'theme\':\'' + theme + '\'}}%%\n' + mermaidSrc.textContent
+
+        try {
+          const result = await mermaid.render(mermaidID, mermaidDefinition)
+          const svgCode = typeof result === 'string' ? result : result.svg
+          if (!svgCode) continue
+
+          const tpl = document.createElement('div')
+          tpl.innerHTML = svgCode
+          const $svg = tpl.firstElementChild
+          if (!$svg) continue
+          $svg.classList.add('mermaid-rendered')
+
+          // 切换浅色/深色主题时会整体重渲染，先清掉上一次的结果，避免叠加出多个 svg
+          const $old = item.querySelector('.mermaid-rendered')
+          if ($old) $old.remove()
+
+          mermaidSrc.insertAdjacentElement('afterend', $svg)
+          if (result && typeof result.bindFunctions === 'function') result.bindFunctions($svg)
+        } catch (err) {
+          console.error('[mermaid] render error:', err)
+        }
       }
-
-      const loadMermaid = () => {
-        window.loadMermaid ? runMermaid() : getScript('!{url_for(theme.asset.mermaid)}').then(runMermaid)
-      }
-
-      window.pjax ? loadMermaid() : document.addEventListener('DOMContentLoaded', loadMermaid)
     }
+
+    window.runMermaid = () => {
+      window.loadMermaid = true
+      const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? '!{theme.mermaid.theme.dark}' : '!{theme.mermaid.theme.light}'
+      renderAll(theme)
+    }
+
+    const loadMermaid = () => {
+      window.loadMermaid ? window.runMermaid() : getScript('!{url_for(theme.asset.mermaid)}').then(window.runMermaid)
+    }
+
+    window.pjax ? loadMermaid() : document.addEventListener('DOMContentLoaded', loadMermaid)
   })()
