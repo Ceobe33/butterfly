@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ECharts 编辑器</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <strong id="file">echart.js</strong>
+        <select id="fencePicker" class="fence-picker" title="选择要编辑的 ```echarts 围栏" hidden></select>
+        <span id="status" class="status">加载中…</span>
+        <span id="sizeNote" class="size-note">—</span>
+      </div>
+      <div class="actions">
+        <button id="undo" class="btn icon" title="撤销 ⌘Z">↶</button>
+        <button id="redo" class="btn icon" title="重做 ⇧⌘Z">↷</button>
+        <label class="chk"><input type="checkbox" id="blogMode" checked /> 按博客渲染</label>
+        <label class="chk"><input type="checkbox" id="darkMode" /> 深色</label>
+        <span class="sep"></span>
+        <label class="chk"><input type="checkbox" id="grid" /> 网格</label>
+        <label class="chk"><input type="checkbox" id="snap" /> 吸附</label>
+        <label class="chk"><input type="checkbox" id="autoSync" checked /> 自动同步</label>
+        <button id="save" class="btn primary">保存 ⌘S</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="canvas-wrap">
+        <div id="stage" class="stage" data-mode="light">
+          <div id="chart"></div>
+          <div id="marquee" class="marquee"></div>
+        </div>
+
+        <div id="selbar" class="selbar" hidden>
+          <span class="sel-count">已选 <b id="selCount">0</b></span>
+          <span class="sep"></span>
+          <button class="btn tiny" data-act="align-y" title="所有选中节点的 Y 坐标对齐到同一水平线">水平对齐</button>
+          <button class="btn tiny" data-act="align-x" title="所有选中节点的 X 坐标对齐到同一垂直线">垂直对齐</button>
+          <button class="btn tiny" data-act="dist-x" title="按 X 轴均匀分布（需 ≥3 个）">水平分布</button>
+          <button class="btn tiny" data-act="dist-y" title="按 Y 轴均匀分布（需 ≥3 个）">垂直分布</button>
+          <span class="sep"></span>
+          <input type="color" id="selColor" class="mini-color" title="批量修改颜色" />
+          <select id="selPos" class="mini-select" title="批量修改标签方位">
+            <option value="">方位…</option>
+            <option value="left">left</option>
+            <option value="right">right</option>
+            <option value="top">top</option>
+            <option value="bottom">bottom</option>
+            <option value="inside">inside</option>
+          </select>
+          <span class="sep"></span>
+          <button class="btn tiny danger" data-act="delete">删除</button>
+          <button class="btn tiny" data-act="clear">取消选择</button>
+        </div>
+
+        <p class="hint">空白处按住拖出选框可多选 · 拖动已选中的点可整体移动 · 方向键微调</p>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-head">
+          <span>节点 <b id="count">0</b></span>
+          <button id="add" class="btn">+ 新增</button>
+        </div>
+        <div id="nodes" class="nodes"></div>
+      </aside>
+    </main>
+
+    <script src="/vendor/echarts.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
