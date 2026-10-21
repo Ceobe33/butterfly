@@ -28,7 +28,7 @@ body {
   flex-direction: column;
 }
 
-/* ---------------------------------------------------------------- 顶栏 */
+/* ---------------------------------------------------------------- Top bar */
 .topbar {
   display: flex;
   align-items: center;
@@ -167,7 +167,7 @@ body {
   color: var(--err);
 }
 
-/* ---------------------------------------------------------------- 布局 */
+/* ---------------------------------------------------------------- Layout */
 main {
   flex: 1;
   display: flex;
@@ -186,7 +186,7 @@ main {
   overflow: auto;
 }
 
-/* 复刻博客 #article-container .echarts-wrap 的尺寸与背景 */
+/* Mirrors the size and background of #article-container .echarts-wrap on the blog */
 .stage {
   position: relative;
   flex: none;
@@ -229,7 +229,7 @@ main {
   pointer-events: none;
 }
 
-/* ------------------------------------------------------------ 批量工具条 */
+/* ------------------------------------------------------------ Bulk toolbar */
 .selbar {
   position: absolute;
   top: 10px;
@@ -287,7 +287,7 @@ main {
   cursor: pointer;
 }
 
-/* ---------------------------------------------------------------- 面板 */
+/* ---------------------------------------------------------------- Panel */
 .panel {
   width: 350px;
   display: flex;
@@ -331,7 +331,7 @@ main {
   line-height: 1.6;
 }
 
-/* 数据模式（没有 scatter 节点时） */
+/* Data mode (when there are no scatter nodes) */
 .data-block {
   margin: 8px;
   border: 1px solid var(--line);
@@ -498,7 +498,7 @@ main {
   border-color: var(--accent);
 }
 
-/* ------------------------------------------------------------ 文件弹窗 */
+/* ------------------------------------------------------------ File dialog */
 .modal {
   position: fixed;
   inset: 0;

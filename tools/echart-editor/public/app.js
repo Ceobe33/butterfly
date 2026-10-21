@@ -48,15 +48,15 @@ function selectedNodes() {
   return state.nodes.filter((n) => state.selected.has(n));
 }
 
-/** 什么情况下还不能直接保存回源文件 */
+/** When the chart cannot be written straight back to the source file */
 function persistBlocked() {
-  if (!state.file) return '空白画布：用「打开…→ 插入当前图表」写到文件';
-  if (state.kind === 'md' && !state.fences.length) return '该文件还没有图表 · 用「插入当前图表」创建';
+  if (!state.file) return 'Blank canvas — use "Open… → Insert current chart" to write it into a file';
+  if (state.kind === 'md' && !state.fences.length) return 'No chart in this file yet — create one with "Insert current chart"';
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// 撤销 / 重做
+// Undo / redo
 // ---------------------------------------------------------------------------
 
 function snapshot() {
@@ -71,7 +71,7 @@ function pushHistory() {
   updateHistoryButtons();
 }
 
-/** 连续输入（拖色块、打字）时避免刷出几十步历史 */
+/** Avoid piling up dozens of history steps while dragging a colour well or typing */
 function pushHistoryOnce(gap = 800) {
   if (Date.now() - state.lastHistoryAt < gap) return;
   pushHistory();
@@ -105,7 +105,7 @@ function updateHistoryButtons() {
 }
 
 // ---------------------------------------------------------------------------
-// 选中态
+// Selection
 // ---------------------------------------------------------------------------
 
 function toggleSelection(node) {
@@ -163,15 +163,15 @@ function refreshUI() {
 }
 
 // ---------------------------------------------------------------------------
-// 复刻博客渲染环境
+// Mirror the blog's rendering environment
 // ---------------------------------------------------------------------------
 
-// 主题 .layout 最大 1200px(含 15px 内边距) → 正文卡 74% → 再减 40px 左右内边距 ≈ 786px
+// Theme .layout maxes out at 1200px (15px padding) → post card 74% → minus ~40px padding ≈ 786px
 const ARTICLE_WIDTH = 786;
 
 /**
- * 与 themes/butterfly/scripts/filters/echarts-fence.js 里的 tune() 保持一致：
- * 背景强制透明，文字 / 轴线 / 网格按深浅色重设。
+ * Matches tune() in themes/butterfly/scripts/filters/echarts-fence.js:
+ * background forced transparent; text, axis lines and grid recoloured for light and dark.
  */
 function blogTune(option, dark) {
   const out = JSON.parse(JSON.stringify(option));
@@ -209,7 +209,7 @@ function blogTune(option, dark) {
   return out;
 }
 
-/** 画布尺寸对齐博客：#article-container .echarts-wrap 的宽 + height 字段的高 */
+/** Canvas size matches the blog: width of #article-container .echarts-wrap, height from the height field */
 function applyStage() {
   const stage = $('#stage');
   const height = Number(state.option.height) || 420;
@@ -224,16 +224,16 @@ function applyStage() {
 }
 
 // ---------------------------------------------------------------------------
-// 图表
+// Chart
 // ---------------------------------------------------------------------------
 
 function buildOption() {
   const opt = JSON.parse(JSON.stringify(state.option));
 
-  // height 在博客端是“容器高度”的约定字段，不进 option
+  // on the blog, height is the container-size convention and never reaches option
   delete opt.height;
 
-  // 节点模式：series 由 nodes 重建；数据模式：option 本身就是数据源，原样使用
+  // node mode: series is rebuilt from nodes; data mode: option is the source of truth, used as is
   if (state.nodeEditable) {
     const lineIndex = opt.series.findIndex((s) => s && s.type === 'line');
     const scatterIndex = opt.series.findIndex((s) => s && s.type === 'scatter');
@@ -248,7 +248,7 @@ function buildOption() {
       const originals = opt.series[scatterIndex].data || [];
 
       opt.series[scatterIndex].data = state.nodes.map((n) => {
-        // 沿用该节点原有的样式字段（有的标签单独设了 fontSize 等）
+        // keep the datum's own style fields (some labels set fontSize individually)
         const base = n.id != null && originals[n.id] && !Array.isArray(originals[n.id]) ? originals[n.id] : {};
         const selected = state.selected.has(n);
 
@@ -266,7 +266,7 @@ function buildOption() {
     }
   }
 
-  // 参考网格（借用坐标轴的 splitLine，轴本身仍然隐藏）
+  // Reference grid (borrows the axis splitLine; the axis itself stays hidden)
   ['xAxis', 'yAxis'].forEach((name) => {
     const axis = Array.isArray(opt[name]) ? opt[name][0] : opt[name];
     if (!axis) return;
@@ -290,7 +290,7 @@ function refreshChart() {
 }
 
 // ---------------------------------------------------------------------------
-// 拖拽 / 框选
+// Dragging / marquee
 // ---------------------------------------------------------------------------
 
 function pickNode(px, py) {
@@ -436,7 +436,7 @@ function bindZr() {
 }
 
 // ---------------------------------------------------------------------------
-// 批量操作
+// Bulk actions
 // ---------------------------------------------------------------------------
 
 function afterBatch() {
@@ -544,7 +544,7 @@ function nudge(dx, dy) {
 }
 
 // ---------------------------------------------------------------------------
-// 右侧面板
+// Side panel
 // ---------------------------------------------------------------------------
 
 function numberInput(value) {
@@ -587,7 +587,7 @@ function makeRow(node) {
   const del = document.createElement('button');
   del.className = 'del';
   del.textContent = '×';
-  del.title = '删除该节点';
+  del.title = 'Delete this node';
 
   top.append(color, name, del);
 
@@ -599,7 +599,7 @@ function makeRow(node) {
 
   const posWrap = document.createElement('label');
   posWrap.className = 'pos-field';
-  posWrap.append(document.createTextNode('标签'));
+  posWrap.append(document.createTextNode('Label'));
 
   const pos = document.createElement('select');
   LABEL_POSITIONS.forEach((value) => {
@@ -616,7 +616,7 @@ function makeRow(node) {
 
   const row = { root, node, x: fx.input, y: fy.input, name, color, pos };
 
-  // 点行空白处选中；Shift 追加
+  // Click the row to select; Shift adds
   root.addEventListener('mousedown', (e) => {
     if (e.target.closest('input, textarea, select, button')) return;
 
@@ -688,7 +688,7 @@ function makeRow(node) {
   return row;
 }
 
-/** 数据模式：把 series 里的数值列成可编辑的输入框 */
+/** Data mode: turn the numbers in series into editable inputs */
 function buildDataEditor(box) {
   const series = Array.isArray(state.option.series) ? state.option.series : [];
   const indicators =
@@ -730,12 +730,12 @@ function buildDataEditor(box) {
   if (!box.querySelector('.data-num')) {
     const empty = document.createElement('p');
     empty.className = 'notice';
-    empty.textContent = '这张图的 series 里没有可以直接编辑的数值。';
+    empty.textContent = "No editable numbers in this chart's series.";
     box.appendChild(empty);
   }
 }
 
-/** 一行数据可能是 数字 / 数字数组 / {value: ...}，统一摊成输入框 */
+/** A row may be a number, an array of numbers or {value: ...}; all become inputs */
 function renderValueCells(container, data, index, indicators) {
   const item = data[index];
 
@@ -811,11 +811,11 @@ function buildPanel() {
   state.rows = [];
   state.rowMap = new Map();
 
-  // 没有 scatter 节点的图表：改用数值编辑
+  // No scatter nodes: fall back to editing the numbers
   if (!state.nodeEditable) {
     const notice = document.createElement('p');
     notice.className = 'notice';
-    notice.textContent = '这张图没有 scatter 节点，下面直接改数值。';
+    notice.textContent = 'This chart has no scatter nodes, so edit the numbers below.';
     box.appendChild(notice);
 
     buildDataEditor(box);
@@ -871,15 +871,15 @@ function addNode() {
 }
 
 // ---------------------------------------------------------------------------
-// 打开文件 / 新建图表
+// Open a file / create a chart
 // ---------------------------------------------------------------------------
 
-let fileCache = null; // 全部文件
-let chartCache = null; // 只含图表的文件
+let fileCache = null; // all files
+let chartCache = null; // files that contain charts
 let selectedFile = null;
 let anchorCache = [];
 
-/** 按「只看含图表」的勾选状态拉取对应列表 */
+/** Fetch the list that matches the "charts only" toggle */
 async function ensureFileList() {
   const chartsOnly = $('#onlyCharts').checked;
 
@@ -908,7 +908,7 @@ async function showFileModal() {
   try {
     await ensureFileList();
   } catch (err) {
-    setStatus('读取文件列表失败：' + err.message, 'err');
+    setStatus('Could not read the file list: ' + err.message, 'err');
   }
 
   renderFileList();
@@ -926,7 +926,7 @@ function renderFileList() {
   if (!files.length) {
     const empty = document.createElement('p');
     empty.className = 'empty';
-    empty.textContent = $('#onlyCharts').checked ? '还没有任何含图表的文件' : '没有匹配的文件';
+    empty.textContent = $('#onlyCharts').checked ? 'No file contains a chart yet' : 'No matching files';
     list.appendChild(empty);
     return;
   }
@@ -936,7 +936,7 @@ function renderFileList() {
     button.type = 'button';
     button.className = 'file-item' + (item.path === selectedFile ? ' active' : '');
     button.dataset.path = item.path;
-    button.textContent = item.fences ? `${item.path}   ·   ${item.fences} 图` : item.path;
+    button.textContent = item.fences ? `${item.path}   ·   ${item.fences} chart(s)` : item.path;
     list.appendChild(button);
   });
 }
@@ -950,7 +950,7 @@ async function pickFile(file) {
   const select = $('#anchorSel');
 
   anchorCache = [];
-  select.innerHTML = '<option value="">插入位置…</option>';
+  select.innerHTML = '<option value="">Insert at…</option>';
   select.disabled = !isMarkdown;
   $('#modalInsert').disabled = true;
 
@@ -958,7 +958,7 @@ async function pickFile(file) {
 
   try {
     const data = await (await fetch('/api/anchors?path=' + encodeURIComponent(file))).json();
-    if (!data.anchors) throw new Error(data.error || '读取失败');
+    if (!data.anchors) throw new Error(data.error || 'read failed');
 
     anchorCache = data.anchors;
     data.anchors.forEach((anchor, i) => {
@@ -968,7 +968,7 @@ async function pickFile(file) {
       select.appendChild(option);
     });
   } catch (err) {
-    setStatus('读取插入位置失败：' + err.message, 'err');
+    setStatus('Could not read insert positions: ' + err.message, 'err');
   }
 }
 
@@ -985,15 +985,15 @@ async function postJson(url, payload) {
 
 async function openSelectedFile() {
   if (!selectedFile) return;
-  setStatus('打开中…', 'busy');
+  setStatus('Opening…', 'busy');
 
   try {
     const data = await postJson('/api/open', { path: selectedFile });
     applyData(data.state);
     $('#fileModal').hidden = true;
-    setStatus('已打开', 'ok');
+    setStatus('Opened', 'ok');
   } catch (err) {
-    setStatus('打开失败：' + err.message, 'err');
+    setStatus('Open failed: ' + err.message, 'err');
   }
 }
 
@@ -1001,7 +1001,7 @@ async function insertCurrentChart() {
   const anchor = anchorCache[Number($('#anchorSel').value)];
   if (!selectedFile || !anchor) return;
 
-  setStatus('插入中…', 'busy');
+  setStatus('Inserting…', 'busy');
 
   try {
     const data = await postJson('/api/insert', {
@@ -1012,12 +1012,12 @@ async function insertCurrentChart() {
       option: state.option
     });
 
-    chartCache = null; // 围栏数变了，下次打开弹窗重新统计
+    chartCache = null; // fence count changed; recount next time the dialog opens
     applyData(data.state);
     $('#fileModal').hidden = true;
-    setStatus(`已插入到 ${data.state.file} · 围栏 ${data.index + 1}`, 'ok');
+    setStatus(`Inserted into ${data.state.file} · fence ${data.index + 1}`, 'ok');
   } catch (err) {
-    setStatus('插入失败：' + err.message, 'err');
+    setStatus('Insert failed: ' + err.message, 'err');
   }
 }
 
@@ -1038,7 +1038,7 @@ function bindFileModal() {
       await ensureFileList();
       renderFileList();
     } catch (err) {
-      setStatus('读取文件列表失败：' + err.message, 'err');
+      setStatus('Could not read the file list: ' + err.message, 'err');
     }
   });
 
@@ -1057,7 +1057,7 @@ function bindFileModal() {
 }
 
 // ---------------------------------------------------------------------------
-// 同步到源码
+// Sync to source
 // ---------------------------------------------------------------------------
 
 async function save() {
@@ -1069,7 +1069,7 @@ async function save() {
     return;
   }
 
-  setStatus('同步中…', 'busy');
+  setStatus('Syncing…', 'busy');
 
   try {
     const res = await fetch(state.nodeEditable ? '/api/nodes' : '/api/option', {
@@ -1084,9 +1084,9 @@ async function save() {
     const data = await res.json();
 
     if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
-    setStatus('已同步 ' + data.savedAt, 'ok');
+    setStatus('Synced ' + data.savedAt, 'ok');
   } catch (err) {
-    setStatus('同步失败：' + err.message, 'err');
+    setStatus('Sync failed: ' + err.message, 'err');
   }
 }
 
@@ -1100,16 +1100,16 @@ function scheduleSync() {
   }
 
   if (!state.autoSync) {
-    setStatus('有未保存改动', 'warn');
+    setStatus('Unsaved changes', 'warn');
     return;
   }
 
-  setStatus('同步中…', 'busy');
+  setStatus('Syncing…', 'busy');
   state.timer = setTimeout(save, 350);
 }
 
 // ---------------------------------------------------------------------------
-// 启动
+// Boot
 // ---------------------------------------------------------------------------
 
 function bindKeyboard() {
@@ -1172,7 +1172,7 @@ async function loadState(fence = 0) {
   return data;
 }
 
-/** 把 /api/state 的返回灌进页面；首次调用会顺带初始化图表 */
+/** Feed the /api/state response into the page; the first call also initialises the chart */
 function applyData(data) {
   Object.assign(state, {
     file: data.file,
@@ -1195,7 +1195,7 @@ function applyData(data) {
   state.history.length = 0;
   state.future.length = 0;
 
-  $('#file').textContent = data.file || '空白画布';
+  $('#file').textContent = data.file || 'Blank canvas';
 
   buildFencePicker();
   applyStage();
@@ -1210,7 +1210,7 @@ function applyData(data) {
   updateHistoryButtons();
 }
 
-/** md 文件里可能有多个 ```echarts 围栏，让用户选 */
+/** A markdown file may hold several ```echarts fences, so let the user pick one */
 function buildFencePicker() {
   const picker = $('#fencePicker');
   const fences = state.fences || [];
@@ -1222,7 +1222,7 @@ function buildFencePicker() {
   fences.forEach((fence) => {
     const option = document.createElement('option');
     option.value = String(fence.index);
-    option.textContent = `围栏 ${fence.index + 1} · 第 ${fence.line} 行${fence.heading ? ' · ' + fence.heading : ''}`;
+    option.textContent = `Fence ${fence.index + 1} · line ${fence.line}${fence.heading ? ' · ' + fence.heading : ''}`;
     picker.appendChild(option);
   });
 
@@ -1230,7 +1230,7 @@ function buildFencePicker() {
 }
 
 // ---------------------------------------------------------------------------
-// 心跳：关掉页面后让服务端自动退出
+// Heartbeat: let the server quit once the page closes
 // ---------------------------------------------------------------------------
 
 const CLIENT_ID = 'c' + Math.random().toString(36).slice(2, 10);
@@ -1242,14 +1242,14 @@ function pingServer() {
     body: JSON.stringify({ id: CLIENT_ID }),
     keepalive: true
   }).catch(() => {
-    /* 服务端已退出时忽略 */
+    /* ignore it if the server has already quit */
   });
 }
 
 function sayBye() {
   const body = JSON.stringify({ id: CLIENT_ID });
 
-  // sendBeacon 在页面卸载时也能发出去
+  // sendBeacon still gets through while the page unloads
   if (navigator.sendBeacon) {
     navigator.sendBeacon('/api/bye', new Blob([body], { type: 'application/json' }));
     return;
@@ -1267,12 +1267,12 @@ function bindLiveness() {
   pingServer();
   setInterval(pingServer, 5000);
 
-  // 后台标签页的定时器会被节流，切回前台时立刻补一次
+  // background tabs have their timers throttled, so ping again as soon as it is visible
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') pingServer();
   });
 
-  // 关标签页 / 刷新 / 跳走都要通知一次
+  // closing, reloading or navigating away all notify once
   let saidBye = false;
   const byeOnce = () => {
     if (saidBye) return;
@@ -1281,7 +1281,7 @@ function bindLiveness() {
   };
 
   window.addEventListener('pagehide', (event) => {
-    if (event.persisted) return; // 进往返缓存不算关闭
+    if (event.persisted) return; // going into the back/forward cache is not a close
     byeOnce();
   });
 
@@ -1328,13 +1328,13 @@ function bindStatic() {
 
   $('#fencePicker').addEventListener('change', async (e) => {
     const target = Number(e.target.value);
-    setStatus('切换围栏…', 'busy');
+    setStatus('Switching fence…', 'busy');
 
     try {
       applyData(await loadState(target));
-      setStatus('已加载', 'ok');
+      setStatus('Loaded', 'ok');
     } catch (err) {
-      setStatus('切换失败：' + err.message, 'err');
+      setStatus('Switch failed: ' + err.message, 'err');
     }
   });
 
@@ -1358,7 +1358,7 @@ function bindStatic() {
 async function boot() {
   bindStatic();
   applyData(await loadState(0));
-  setStatus('已加载', 'ok');
+  setStatus('Loaded', 'ok');
 }
 
-boot().catch((err) => setStatus('加载失败：' + err.message, 'err'));
+boot().catch((err) => setStatus('Failed to load: ' + err.message, 'err'));

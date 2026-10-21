@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * ECharts 浏览器编辑器 —— 改图的同时把数据同步回源码。
+ * ECharts editor in the browser — tweak the chart and sync the data straight back into the source.
  *
- *   npm run ec                                          # 默认编辑仓库根目录的 echart.js
- *   npm run ec -- --file source/_posts/xxx.md           # 直接改文章里的 ```echarts 围栏
+ *   npm run ec                                          # blank canvas; pick a file in the browser
+ *   npm run ec -- --file source/_posts/xxx.md           # open an ```echarts fence inside an article
  *
- * 可选参数：--file <路径>  --port <端口>  --no-open（不自动开浏览器）
+ * Options: --file <path>  --port <port>  --no-open  --keep-alive
  *
- * 支持两种源文件格式，自动识别：
+ * Two source formats are recognised automatically:
  *
- *   A. JS 脚本（`var option = {...}` + `const nodes = [[x,y,name,color,pos], ...]`）
- *      把源码放进 vm 跑一遍取 option；保存时只重写 nodes 那一段，
- *      未改动的条目按原文逐字回写，其余代码（配色常量、注释）原样保留。
+ *   A. A JS script (`var option = {...}` + `const nodes = [[x,y,name,color,pos], ...]`)
+ *      the source is run through a vm to pull out option; on save only the nodes block is rewritten,
+ *      untouched entries are written back verbatim and everything else (palette constants, comments) is left alone.
  *
- *   B. 纯 JSON 的 option（直接把 option 存成 .json 那样的大括号文件）
- *      直接 JSON.parse；nodes 从 series 里 type=scatter 的那条序列取，
- *      保存时重建 series 的 data 再整体序列化写回。
+ *   B. A plain-JSON option (an option saved straight out as a braces file)
+ *      parsed with JSON.parse; nodes come from the series whose type is scatter,
+ *      and on save the series data is rebuilt and the whole file re-serialised.
  */
 
 'use strict';
@@ -26,7 +26,7 @@ const path = require('path');
 const vm = require('vm');
 const { execFile } = require('child_process');
 
-// themes/butterfly/tools/echart-editor -> 仓库根目录（往上 4 层）
+// themes/butterfly/tools/echart-editor -> repo root (four levels up)
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const VENDOR_DIR = path.join(__dirname, 'vendor');
@@ -36,7 +36,7 @@ function arg(name, fallback) {
   return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
-// 没有 --file 时进入空白画布模式，之后可在浏览器里选文件
+// without --file it opens on a blank canvas; files are picked in the browser
 const fileArg = arg('file', null);
 let FILE = fileArg ? path.resolve(ROOT, fileArg) : null;
 
@@ -54,7 +54,7 @@ const MIME = {
 
 const EMPTY_NODE_COLOR = '#4bacc6';
 
-/** 空白画布的初始 option（不写死文字颜色，交给博客的 tune() 决定） */
+/** initial option for a blank canvas (no hard-coded text colour; the blog's tune() decides) */
 const DEFAULT_OPTION = {
   height: 420,
   grid: { top: 40, right: 40, bottom: 40, left: 40 },
@@ -90,7 +90,7 @@ const DEFAULT_PALETTE = {
 };
 
 // ---------------------------------------------------------------------------
-// 通用
+// Shared helpers
 // ---------------------------------------------------------------------------
 
 function readSource() {
@@ -101,7 +101,7 @@ function writeAtomic(text) {
   fs.writeFileSync(FILE + '.tmp', text, 'utf8');
   fs.renameSync(FILE + '.tmp', FILE);
 
-  chartListCache = null; // 文件变了，文件列表里的围栏数要重算
+  chartListCache = null; // file changed, so fence counts in the picker must be recomputed
   return text.length;
 }
 
@@ -114,8 +114,8 @@ function detectKind(code, file = FILE) {
 }
 
 /**
- * 扫出 markdown 里所有的 ```echarts 围栏。
- * 记录开/闭行号、缩进，以及它所属的最近一个标题，方便在 UI 里区分。
+ * Find every ```echarts fence in the markdown.
+ * Records opening/closing line numbers, the indent and the nearest heading above, so the UI can tell them apart.
  */
 function findFences(text) {
   const lines = text.split('\n');
@@ -141,7 +141,7 @@ function findFences(text) {
       }
     }
 
-    if (close < 0) break; // 没闭合，后面的不算
+    if (close < 0) break; // never closed, so ignore the rest
 
     fences.push({
       index: fences.length,
@@ -163,10 +163,10 @@ function seriesIndexOf(option, type) {
   return series.findIndex((s) => s && s.type === type);
 }
 
-/** 从 option 的 scatter 序列里取出 [x, y, name, color, labelPosition] */
+/** Pull [x, y, name, colour, labelPosition] out of the scatter series */
 function nodesFromOption(option) {
   const index = seriesIndexOf(option, 'scatter');
-  // 雷达图、饼图这类没有 scatter 的图表：能打开查看，但没有可拖的节点
+  // Radar and pie charts have no scatter series: they open for viewing with no draggable points
   if (index < 0) return [];
 
   return (option.series[index].data || []).map((datum) => {
@@ -184,10 +184,10 @@ function nodesFromOption(option) {
   });
 }
 
-/** 把编辑后的节点写回 option（保留每个 datum 原有的其它样式字段） */
+/** Write the edited nodes back into option, keeping each datum's other style fields */
 function applyNodesToOption(option, nodes) {
   const scatterIndex = seriesIndexOf(option, 'scatter');
-  if (scatterIndex < 0) return option; // 没有 scatter 就原样返回
+  if (scatterIndex < 0) return option; // nothing to do without a scatter series
 
   const scatter = option.series[scatterIndex];
   const originals = Array.isArray(scatter.data) ? scatter.data.slice() : [];
@@ -217,13 +217,13 @@ function applyNodesToOption(option, nodes) {
 }
 
 // ---------------------------------------------------------------------------
-// 格式 A：JS 源码
+// Format A: JS source
 // ---------------------------------------------------------------------------
 
-/** 定位 `const nodes = [ ... ]` 的中括号位置 */
+/** Locate the brackets of `const nodes = [ ... ]` */
 function findNodesBlock(code) {
   const m = /const\s+nodes\s*=\s*\[/.exec(code);
-  if (!m) throw new Error('源文件里找不到 “const nodes = [ ... ]”');
+  if (!m) throw new Error('no "const nodes = [ ... ]" found in the source');
 
   const open = m.index + m[0].length - 1;
   let depth = 0;
@@ -258,10 +258,10 @@ function findNodesBlock(code) {
     }
   }
 
-  throw new Error('nodes 数组没有正确闭合');
+  throw new Error('the nodes array is not closed properly');
 }
 
-/** 按顶层逗号切分数组元素（忽略字符串 / 注释里的逗号） */
+/** Split array elements on top-level commas (ignoring commas inside strings and comments) */
 function splitTopLevel(body) {
   const parts = [];
   let start = 0;
@@ -299,9 +299,9 @@ function splitTopLevel(body) {
 }
 
 /**
- * 拆出“行首注释”和“条目代码”。
- * rawFull 保留原有的空行与缩进，未改动的条目靠它逐字回写；
- * gap 是条目之前的换行数（用于还原分段之间的空行）。
+ * Separate the leading comments from the entry code.
+ * rawFull keeps the original blank lines and indentation so untouched entries can go back verbatim;
+ * gap is the run of newlines before the entry (used to restore blank lines between sections).
  */
 function dissect(raw) {
   const leadingWS = (raw.match(/^\s*/) || [''])[0];
@@ -328,7 +328,7 @@ function dissect(raw) {
   };
 }
 
-/** 在 vm 里执行源文件，拿到真实的 option / nodes */
+/** Run the source in a vm to get the real option / nodes */
 function evaluate(code) {
   const sandbox = {
     require: () => ({ init: () => ({ setOption() {} }) }),
@@ -349,15 +349,15 @@ function evaluate(code) {
 
   const out = sandbox.__echart_editor__;
   if (!out || !out.option) {
-    throw new Error('没能从源文件里取到 option');
+    throw new Error('could not read option from the source');
   }
   if (!Array.isArray(out.nodes)) {
-    throw new Error('没能从源文件里取到 nodes 数组');
+    throw new Error('could not read the nodes array from the source');
   }
   return out;
 }
 
-/** 收集源码里的配色常量：const cBlue = '#4BACC6' */
+/** Collect the colour constants in the source: const cBlue = '#4BACC6' */
 function parsePalette(code) {
   const re = /^[ \t]*const[ \t]+([A-Za-z_$][\w$]*)[ \t]*=[ \t]*['"](#[0-9a-fA-F]{3,8})['"]/gm;
   const hexToName = {};
@@ -422,7 +422,7 @@ function sameValue(value, node) {
   );
 }
 
-/** 把节点数组写回 JS 源码，只替换 nodes 那一段 */
+/** Write nodes back into the JS source, replacing only the nodes block */
 function writeNodesJs(code, incoming) {
   const block = findNodesBlock(code);
   const parsed = evaluate(code).nodes;
@@ -434,7 +434,7 @@ function writeNodesJs(code, incoming) {
     const id = Number.isInteger(node.id) ? node.id : -1;
     const orig = id >= 0 && originals[id] ? originals[id] : null;
 
-    // 没动过的条目：原文照抄，连注释、空行和换行格式都不变
+    // untouched entries: copy the original text, comments, blank lines and all
     if (orig && sameValue(orig.value, node)) return orig.rawFull;
 
     const head = orig ? orig.comments.map((c) => '  ' + c) : [];
@@ -446,10 +446,10 @@ function writeNodesJs(code, incoming) {
 }
 
 // ---------------------------------------------------------------------------
-// 格式 B：纯 JSON 的 option
+// Format B: plain-JSON option
 // ---------------------------------------------------------------------------
 
-/** 自定义序列化：短对象/数组保持单行，让 diff 不至于炸开 */
+/** Custom serialiser: keep short objects and arrays on one line so diffs stay readable */
 function serializeJson(value, pad = '') {
   const inner = pad + '  ';
   const flat = JSON.stringify(value);
@@ -470,7 +470,7 @@ function serializeJson(value, pad = '') {
 }
 
 // ---------------------------------------------------------------------------
-// 统一读写
+// Read and write
 // ---------------------------------------------------------------------------
 
 function loadChart(fenceIndex = 0) {
@@ -480,7 +480,7 @@ function loadChart(fenceIndex = 0) {
   if (kind === 'md') {
     const fences = findFences(code);
 
-    // 还没有图表的文章：给它一块空白画布，方便用「插入当前图表」新建
+    // Article with no chart yet: hand back a blank canvas so "Insert current chart" can create one
     if (!fences.length) {
       return {
         kind,
@@ -500,7 +500,7 @@ function loadChart(fenceIndex = 0) {
     try {
       option = JSON.parse(fence.body);
     } catch (err) {
-      throw new Error(`第 ${index + 1} 个围栏的 JSON 解析失败：${err.message}`);
+      throw new Error(`JSON in fence ${index + 1} failed to parse: ${err.message}`);
     }
 
     return {
@@ -519,7 +519,7 @@ function loadChart(fenceIndex = 0) {
     try {
       option = JSON.parse(code);
     } catch (err) {
-      throw new Error(`JSON 解析失败：${err.message}`);
+      throw new Error(`JSON parse failed: ${err.message}`);
     }
     return {
       kind,
@@ -551,16 +551,16 @@ function paletteOf(chart) {
 
 function writeNodes(incoming, fenceIndex = 0) {
   if (!FILE) {
-    throw new Error('还没有目标文件：先「打开」一个文件，或用「插入到文件」新建图表');
+    throw new Error('no target file yet: open one, or use "Insert current chart" to create a chart');
   }
 
   const chart = loadChart(fenceIndex);
   const count = incoming.length;
 
-  // markdown：只替换围栏正文，围栏外的内容一字不动
+  // markdown: replace only the fence body, nothing outside it
   if (chart.kind === 'md') {
     const fence = findFences(chart.code)[chart.fenceIndex];
-    if (!fence) throw new Error('这个文件里还没有图表，请用「插入当前图表」新建一个');
+    if (!fence) throw new Error('this file has no chart yet — use "Insert current chart" to add one');
 
     const option = applyNodesToOption(JSON.parse(fence.body), incoming);
 
@@ -584,22 +584,22 @@ function writeNodes(incoming, fenceIndex = 0) {
 }
 
 /**
- * 没有 scatter 节点的图表（雷达图等）直接回写整份 option。
- * 只支持 md / json 两种格式；JS 源码由 nodes 派生 option，不能整体覆盖。
+ * Charts without a scatter series (radar and the like) write the whole option back instead.
+ * Only md and json are supported; in JS sources option is derived from nodes, so it cannot be overwritten wholesale.
  */
 function writeOption(incoming, fenceIndex = 0) {
-  if (!FILE) throw new Error('还没有目标文件');
-  if (!incoming || typeof incoming !== 'object') throw new Error('option 不合法');
+  if (!FILE) throw new Error('no target file yet');
+  if (!incoming || typeof incoming !== 'object') throw new Error('invalid option');
 
   const chart = loadChart(fenceIndex);
 
   if (chart.kind === 'js') {
-    throw new Error('JS 格式的图表请用节点编辑');
+    throw new Error('use node editing for JS-format charts');
   }
 
   if (chart.kind === 'md') {
     const fence = findFences(chart.code)[chart.fenceIndex];
-    if (!fence) throw new Error('这个文件里还没有图表，请先「插入当前图表」');
+    if (!fence) throw new Error('this file has no chart yet — use "Insert current chart" first');
 
     const text = serializeJson(incoming);
     const body = text
@@ -617,21 +617,21 @@ function writeOption(incoming, fenceIndex = 0) {
 }
 
 // ---------------------------------------------------------------------------
-// 工作区：浏览 / 打开 / 新建
+// Workspace: browse / open / create
 // ---------------------------------------------------------------------------
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'public', 'themes', '.deploy_git', '.github', '.idea', '.vscode']);
 
-/** 把用户传来的相对路径限制在站点目录内 */
+/** Keep a client-supplied relative path inside the site directory */
 function resolveInRoot(relPath) {
   const target = path.resolve(ROOT, relPath);
   const rel = path.relative(ROOT, target);
 
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new Error('路径不在站点目录内');
+    throw new Error('path is outside the site directory');
   }
   if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) {
-    throw new Error('文件不存在：' + relPath);
+    throw new Error('file not found: ' + relPath);
   }
 
   return target;
@@ -641,9 +641,9 @@ let chartListCache = null;
 let chartListPromise = null;
 
 /**
- * 用 grep 一次性统计每个 md 里 ```echarts 的出现次数。
- * 逐个 readFileSync 在冷盘上要 8 秒，grep 是单进程流式扫描，快一个量级。
- * grep 不可用时返回 null，由调用方回退。
+ * Count ```echarts occurrences per markdown file in a single grep pass.
+ * Reading file by file took 8s on a cold disk; grep streams it in one process and is an order of magnitude faster.
+ * Returns null when grep is unavailable, and the caller falls back.
  */
 function grepChartCounts(dir) {
   return new Promise((resolve) => {
@@ -652,7 +652,7 @@ function grepChartCounts(dir) {
       ['-rcF', '--include=*.md', '```echarts', dir],
       { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
       (err, stdout) => {
-        // 退出码 1 表示“没有匹配”，不是错误；其它异常（如系统没有 grep）才回退
+        // exit code 1 means "no match", not a failure; only real errors (no grep installed) fall back
         if (err && typeof err.code !== 'number') return resolve(null);
         resolve(stdout || '');
       }
@@ -660,7 +660,7 @@ function grepChartCounts(dir) {
   });
 }
 
-/** 回退方案：自己逐个读（跨平台保底，慢一点） */
+/** Fallback: read the files one by one (portable but slower) */
 async function scanChartCounts(dir) {
   const out = [];
   const stack = [dir];
@@ -701,7 +701,7 @@ async function scanChartCounts(dir) {
   return out;
 }
 
-/** 只含图表的文件列表（带围栏数量） */
+/** Files that contain charts (with fence counts) */
 async function buildChartList() {
   const out = [];
   const stdout = await grepChartCounts('source');
@@ -719,7 +719,7 @@ async function buildChartList() {
     out.push(...(await scanChartCounts(path.join(ROOT, 'source'))));
   }
 
-  // 根目录下单独的图表文件
+  // Standalone chart files in the repo root
   try {
     const entries = await fs.promises.readdir(ROOT, { withFileTypes: true });
 
@@ -731,7 +731,7 @@ async function buildChartList() {
       if (text.includes('series')) out.push({ path: entry.name, fences: 1 });
     }
   } catch (err) {
-    /* 根目录读不到就算了 */
+    /* root not readable — never mind */
   }
 
   out.sort((a, b) => a.path.localeCompare(b.path));
@@ -739,7 +739,7 @@ async function buildChartList() {
   return out;
 }
 
-/** 全部文件（不算围栏数，很快） */
+/** Every file (no fence counting, so it is quick) */
 function plainFileList() {
   const out = [];
 
@@ -774,7 +774,7 @@ function plainFileList() {
       out.push({ path: entry.name, fences: null });
     });
   } catch (err) {
-    /* 根目录读不到就算了 */
+    /* root not readable — never mind */
   }
 
   out.sort((a, b) => a.path.localeCompare(b.path));
@@ -794,23 +794,23 @@ async function listFiles(chartsOnly = false) {
   return chartListPromise;
 }
 
-/** markdown 里可插入图表的位置：文首、每个标题之后、文末 */
+/** Where a chart can go: top of the file, after each heading, or the end */
 function anchorsFor(target) {
   const lines = fs.readFileSync(target, 'utf8').split('\n');
-  const anchors = [{ mode: 'start', line: 0, label: '文件开头' }];
+  const anchors = [{ mode: 'start', line: 0, label: 'Top of file' }];
 
   lines.forEach((line, i) => {
     const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
     if (m) {
-      anchors.push({ mode: 'after-heading', line: i + 1, label: `第 ${i + 1} 行 · ${m[1]} ${m[2]}` });
+      anchors.push({ mode: 'after-heading', line: i + 1, label: `line ${i + 1} · ${m[1]} ${m[2]}` });
     }
   });
 
-  anchors.push({ mode: 'end', line: lines.length, label: '文件末尾' });
+  anchors.push({ mode: 'end', line: lines.length, label: 'End of file' });
   return anchors;
 }
 
-/** 把当前画布内容作为新的 ```echarts 围栏插入到指定位置 */
+/** Insert the current canvas as a new ```echarts fence at the chosen spot */
 function insertFence(payload) {
   const target = resolveInRoot(payload.path);
   const lines = fs.readFileSync(target, 'utf8').split('\n');
@@ -873,7 +873,7 @@ function readBody(req, limit = 2 * 1024 * 1024) {
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > limit) {
-        reject(new Error('请求体过大'));
+        reject(new Error('request body too large'));
         req.destroy();
         return;
       }
@@ -950,14 +950,14 @@ function serveStatic(res, dir, relPath) {
 }
 
 // ---------------------------------------------------------------------------
-// 页面存活检测：关掉标签页后自动退出，不留下占着端口的后台进程
+// Liveness: quit once the tab is closed, so nothing keeps sitting on the port
 // ---------------------------------------------------------------------------
 
-const KEEP_ALIVE = process.argv.includes('--keep-alive'); // 常驻模式，不自动退出
-const CLIENT_TIMEOUT = 120000; // 页面崩溃/休眠时，多久没有任何心跳就退出
-const EXIT_GRACE = 3000; // 关页后留一点时间，避免刷新时被误杀
+const KEEP_ALIVE = process.argv.includes('--keep-alive'); // stay alive, never auto-quit
+const CLIENT_TIMEOUT = 120000; // quit after this long with no heartbeat (crash or sleep)
+const EXIT_GRACE = 3000; // grace period after a page closes, so a reload is not killed by mistake
 
-const clients = new Map(); // 页面 id -> 最后一次心跳时间
+const clients = new Map(); // page id -> last heartbeat
 let hadClient = false;
 let exitTimer = null;
 
@@ -970,9 +970,9 @@ function cancelExit() {
 function scheduleExit(reason) {
   if (KEEP_ALIVE || exitTimer) return;
 
-  console.log(`\n[exit] ${reason}，${EXIT_GRACE / 1000} 秒后关闭服务…`);
+  console.log(`\n[exit] ${reason}, shutting down in ${EXIT_GRACE / 1000}s…`);
   exitTimer = setTimeout(() => {
-    console.log('[exit] 已退出');
+    console.log('[exit] stopped');
     process.exit(0);
   }, EXIT_GRACE);
 }
@@ -985,7 +985,7 @@ setInterval(() => {
     if (now - seen > CLIENT_TIMEOUT) clients.delete(id);
   }
 
-  if (hadClient && clients.size === 0) scheduleExit('页面长时间没有心跳');
+  if (hadClient && clients.size === 0) scheduleExit('page went quiet');
 }, 30000);
 
 const server = http.createServer(async (req, res) => {
@@ -999,7 +999,10 @@ const server = http.createServer(async (req, res) => {
         const isNew = !clients.has(id);
         clients.set(id, Date.now());
         hadClient = true;
-        if (isNew) console.log(`[page] 已连接（${clients.size} 个页面）`);
+        if (isNew) {
+          const total = clients.size;
+          console.log(`[page] connected (${total} page${total === 1 ? '' : 's'} open)`);
+        }
       }
       cancelExit();
       return sendJson(res, 200, { ok: true });
@@ -1008,9 +1011,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/bye' && req.method === 'POST') {
       const payload = JSON.parse((await readBody(req)) || '{}');
       if (payload.id && clients.delete(String(payload.id))) {
-        console.log(`[page] 已断开（剩 ${clients.size} 个页面）`);
+        const left = clients.size;
+        console.log(`[page] disconnected (${left} page${left === 1 ? '' : 's'} left)`);
       }
-      if (hadClient && clients.size === 0) scheduleExit('页面已关闭');
+      if (hadClient && clients.size === 0) scheduleExit('page closed');
       return sendJson(res, 200, { ok: true });
     }
 
@@ -1023,11 +1027,11 @@ const server = http.createServer(async (req, res) => {
       const payload = JSON.parse(raw);
 
       if (!Array.isArray(payload.nodes)) {
-        return sendJson(res, 400, { ok: false, error: 'nodes 必须是数组' });
+        return sendJson(res, 400, { ok: false, error: 'nodes must be an array' });
       }
 
       const result = writeNodes(payload.nodes, Number(payload.fence ?? 0));
-      console.log(`[sync] ${path.basename(FILE)} <- ${result.count} 个节点`);
+      console.log(`[sync] ${path.basename(FILE)} <- ${result.count} node(s)`);
 
       return sendJson(res, 200, {
         ok: true,
@@ -1038,7 +1042,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/option' && req.method === 'POST') {
       const payload = JSON.parse(await readBody(req));
       const result = writeOption(payload.option, Number(payload.fence ?? 0));
-      console.log(`[sync] ${path.basename(FILE)} <- option（数据模式）`);
+      console.log(`[sync] ${path.basename(FILE)} <- option (data mode)`);
 
       return sendJson(res, 200, {
         ok: true,
@@ -1066,7 +1070,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/insert' && req.method === 'POST') {
       const payload = JSON.parse(await readBody(req));
       const result = insertFence(payload);
-      console.log(`[insert] ${result.file} <- 新围栏 #${result.index + 1}`);
+      console.log(`[insert] ${result.file} <- new fence #${result.index + 1}`);
       return sendJson(res, 200, { ok: true, index: result.index, state: buildState(result.index) });
     }
 
@@ -1084,13 +1088,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// 端口被占（常见于上次没关干净）时自动往后找，不要直接抛 EADDRINUSE
+// If the port is taken (usually a leftover instance) try the next one rather than throwing EADDRINUSE
 let port = BASE_PORT;
 let attempts = 0;
 
 server.on('error', (err) => {
   if (err.code !== 'EADDRINUSE' || attempts >= 20) {
-    console.error(`启动失败：${err.message}`);
+    console.error(`failed to start: ${err.message}`);
     process.exit(1);
   }
   attempts++;
@@ -1098,32 +1102,32 @@ server.on('error', (err) => {
   server.listen(port);
 });
 
-/** 启动后自动打开浏览器（--no-open 可关闭） */
+/** Open the browser once listening (disable with --no-open) */
 function openBrowser(url) {
   const win = process.platform === 'win32';
   const bin = win ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
   const args = win ? ['/c', 'start', '', url] : [url];
 
   execFile(bin, args, () => {
-    /* 打不开就算了，不影响服务 */
+    /* if it does not open, carry on regardless */
   });
 }
 
 server.on('listening', () => {
   if (attempts > 0) {
-    console.log(`端口 ${BASE_PORT} 已被占用（可能是上次的实例没关），已自动改用 ${port}`);
+    console.log(`port ${BASE_PORT} was busy (a previous instance?), now listening on ${port}`);
   }
 
   const url = `http://localhost:${port}`;
-  console.log(`ECharts 编辑器  ${url}`);
-  console.log(`目标文件      ${FILE || '（未选择 · 浏览器里可打开任意文件）'}`);
-  console.log(KEEP_ALIVE ? '常驻模式 · Ctrl+C 退出' : '关闭页面后自动退出 · Ctrl+C 也可退出');
+  console.log(`ECharts editor  ${url}`);
+  console.log(`Target          ${FILE || '(none yet — pick a file in the browser)'}`);
+  console.log(KEEP_ALIVE ? 'staying alive · Ctrl+C to quit' : 'quits when the page closes · Ctrl+C also works');
 
   if (!NO_OPEN) openBrowser(url);
 
-  // 后台预热「含图表」索引，第一次打开弹窗时就不用等扫描
+  // Warm the "charts only" index in the background so the dialog opens instantly
   listFiles(true).catch(() => {
-    /* 预热失败不影响使用 */
+    /* a failed warm-up is harmless */
   });
 });
 
