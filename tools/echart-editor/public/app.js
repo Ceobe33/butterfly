@@ -10,6 +10,7 @@ const state = {
   kind: 'js',
   fences: [],
   fenceIndex: 0,
+  nodeEditable: true,
   nodes: [],
   option: null,
   palette: {},
@@ -45,6 +46,13 @@ function setStatus(text, kind) {
 
 function selectedNodes() {
   return state.nodes.filter((n) => state.selected.has(n));
+}
+
+/** 什么情况下还不能直接保存回源文件 */
+function persistBlocked() {
+  if (!state.file) return '空白画布：用「打开…→ 插入当前图表」写到文件';
+  if (state.kind === 'md' && !state.fences.length) return '该文件还没有图表 · 用「插入当前图表」创建';
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,35 +233,37 @@ function buildOption() {
   // height 在博客端是“容器高度”的约定字段，不进 option
   delete opt.height;
 
-  // 不按下标取，按 type 找，兼容不同来源的 option
-  const lineIndex = opt.series.findIndex((s) => s && s.type === 'line');
-  const scatterIndex = opt.series.findIndex((s) => s && s.type === 'scatter');
+  // 节点模式：series 由 nodes 重建；数据模式：option 本身就是数据源，原样使用
+  if (state.nodeEditable) {
+    const lineIndex = opt.series.findIndex((s) => s && s.type === 'line');
+    const scatterIndex = opt.series.findIndex((s) => s && s.type === 'scatter');
 
-  if (lineIndex >= 0) {
-    const line = state.nodes.map((n) => [n.x, n.y]);
-    if (line.length > 1) line.push([state.nodes[0].x, state.nodes[0].y]);
-    opt.series[lineIndex].data = line;
-  }
+    if (lineIndex >= 0) {
+      const line = state.nodes.map((n) => [n.x, n.y]);
+      if (line.length > 1) line.push([state.nodes[0].x, state.nodes[0].y]);
+      opt.series[lineIndex].data = line;
+    }
 
-  if (scatterIndex >= 0) {
-    const originals = opt.series[scatterIndex].data || [];
+    if (scatterIndex >= 0) {
+      const originals = opt.series[scatterIndex].data || [];
 
-    opt.series[scatterIndex].data = state.nodes.map((n) => {
-      // 沿用该节点原有的样式字段（有的标签单独设了 fontSize 等）
-      const base = n.id != null && originals[n.id] && !Array.isArray(originals[n.id]) ? originals[n.id] : {};
-      const selected = state.selected.has(n);
+      opt.series[scatterIndex].data = state.nodes.map((n) => {
+        // 沿用该节点原有的样式字段（有的标签单独设了 fontSize 等）
+        const base = n.id != null && originals[n.id] && !Array.isArray(originals[n.id]) ? originals[n.id] : {};
+        const selected = state.selected.has(n);
 
-      return {
-        name: n.name,
-        value: [n.x, n.y],
-        itemStyle: {
-          ...(base.itemStyle || {}),
-          color: n.color,
-          ...(selected ? { borderColor: '#ffffff', borderWidth: 3 } : {})
-        },
-        label: { ...(base.label || {}), position: n.label }
-      };
-    });
+        return {
+          name: n.name,
+          value: [n.x, n.y],
+          itemStyle: {
+            ...(base.itemStyle || {}),
+            color: n.color,
+            ...(selected ? { borderColor: '#ffffff', borderWidth: 3 } : {})
+          },
+          label: { ...(base.label || {}), position: n.label }
+        };
+      });
+    }
   }
 
   // 参考网格（借用坐标轴的 splitLine，轴本身仍然隐藏）
@@ -678,11 +688,144 @@ function makeRow(node) {
   return row;
 }
 
+/** 数据模式：把 series 里的数值列成可编辑的输入框 */
+function buildDataEditor(box) {
+  const series = Array.isArray(state.option.series) ? state.option.series : [];
+  const indicators =
+    state.option.radar && Array.isArray(state.option.radar.indicator)
+      ? state.option.radar.indicator.map((item) => (item && item.name) || '')
+      : [];
+
+  series.forEach((entry, si) => {
+    if (!entry || !Array.isArray(entry.data) || !entry.data.length) return;
+
+    const block = document.createElement('div');
+    block.className = 'data-block';
+
+    const head = document.createElement('div');
+    head.className = 'data-head';
+    head.textContent = `series[${si}] · ${entry.type || 'series'}`;
+    block.appendChild(head);
+
+    entry.data.forEach((row, ri) => {
+      const line = document.createElement('div');
+      line.className = 'data-row';
+
+      const label = document.createElement('span');
+      label.className = 'data-label';
+      label.textContent = row && typeof row === 'object' && row.name ? row.name : `#${ri + 1}`;
+      line.appendChild(label);
+
+      const group = document.createElement('div');
+      group.className = 'data-values';
+      line.appendChild(group);
+
+      renderValueCells(group, entry.data, ri, indicators);
+      block.appendChild(line);
+    });
+
+    box.appendChild(block);
+  });
+
+  if (!box.querySelector('.data-num')) {
+    const empty = document.createElement('p');
+    empty.className = 'notice';
+    empty.textContent = '这张图的 series 里没有可以直接编辑的数值。';
+    box.appendChild(empty);
+  }
+}
+
+/** 一行数据可能是 数字 / 数字数组 / {value: ...}，统一摊成输入框 */
+function renderValueCells(container, data, index, indicators) {
+  const item = data[index];
+
+  const make = (value, apply, hint) => {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = 'any';
+    input.className = 'data-num';
+    input.value = String(value);
+    if (hint) input.title = hint;
+
+    input.addEventListener('input', () => {
+      const next = Number(input.value);
+      if (!Number.isFinite(next)) return;
+
+      apply(next);
+      refreshChart();
+      scheduleSync();
+    });
+
+    container.appendChild(input);
+  };
+
+  if (typeof item === 'number') {
+    make(item, (next) => {
+      data[index] = next;
+    });
+    return;
+  }
+
+  if (Array.isArray(item)) {
+    item.forEach((value, vi) => {
+      if (typeof value !== 'number') return;
+      make(
+        value,
+        (next) => {
+          item[vi] = next;
+        },
+        indicators[vi]
+      );
+    });
+    return;
+  }
+
+  if (item && typeof item === 'object') {
+    const value = item.value;
+
+    if (typeof value === 'number') {
+      make(value, (next) => {
+        item.value = next;
+      });
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((single, vi) => {
+        if (typeof single !== 'number') return;
+        make(
+          single,
+          (next) => {
+            value[vi] = next;
+          },
+          indicators[vi]
+        );
+      });
+    }
+  }
+}
+
 function buildPanel() {
   const box = $('#nodes');
   box.innerHTML = '';
   state.rows = [];
   state.rowMap = new Map();
+
+  // 没有 scatter 节点的图表：改用数值编辑
+  if (!state.nodeEditable) {
+    const notice = document.createElement('p');
+    notice.className = 'notice';
+    notice.textContent = '这张图没有 scatter 节点，下面直接改数值。';
+    box.appendChild(notice);
+
+    buildDataEditor(box);
+
+    $('#count').textContent = '0';
+    $('#add').disabled = true;
+    return;
+  }
+
+  $('#add').disabled = false;
 
   state.nodes.forEach((node) => {
     const row = makeRow(node);
@@ -704,6 +847,8 @@ function syncRowFor(node) {
 }
 
 function addNode() {
+  if (!state.nodeEditable) return;
+
   pushHistory();
 
   const colors = Object.values(state.palette);
@@ -726,18 +871,215 @@ function addNode() {
 }
 
 // ---------------------------------------------------------------------------
+// 打开文件 / 新建图表
+// ---------------------------------------------------------------------------
+
+let fileCache = null; // 全部文件
+let chartCache = null; // 只含图表的文件
+let selectedFile = null;
+let anchorCache = [];
+
+/** 按「只看含图表」的勾选状态拉取对应列表 */
+async function ensureFileList() {
+  const chartsOnly = $('#onlyCharts').checked;
+
+  if (chartsOnly) {
+    if (!chartCache) {
+      const data = await (await fetch('/api/files?charts=1')).json();
+      chartCache = data.files || [];
+    }
+    return;
+  }
+
+  if (!fileCache) {
+    const data = await (await fetch('/api/files')).json();
+    fileCache = data.files || [];
+  }
+}
+
+function activeFiles() {
+  return $('#onlyCharts').checked ? chartCache || [] : fileCache || [];
+}
+
+async function showFileModal() {
+  $('#fileModal').hidden = false;
+  $('#fileSearch').value = '';
+
+  try {
+    await ensureFileList();
+  } catch (err) {
+    setStatus('读取文件列表失败：' + err.message, 'err');
+  }
+
+  renderFileList();
+}
+
+function renderFileList() {
+  const query = $('#fileSearch').value.trim().toLowerCase();
+  const list = $('#fileList');
+  list.innerHTML = '';
+
+  const files = activeFiles()
+    .filter((item) => !query || item.path.toLowerCase().includes(query))
+    .slice(0, 500);
+
+  if (!files.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = $('#onlyCharts').checked ? '还没有任何含图表的文件' : '没有匹配的文件';
+    list.appendChild(empty);
+    return;
+  }
+
+  files.forEach((item) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'file-item' + (item.path === selectedFile ? ' active' : '');
+    button.dataset.path = item.path;
+    button.textContent = item.fences ? `${item.path}   ·   ${item.fences} 图` : item.path;
+    list.appendChild(button);
+  });
+}
+
+async function pickFile(file) {
+  selectedFile = file;
+  renderFileList();
+  $('#modalOpen').disabled = false;
+
+  const isMarkdown = /\.md$/i.test(file);
+  const select = $('#anchorSel');
+
+  anchorCache = [];
+  select.innerHTML = '<option value="">插入位置…</option>';
+  select.disabled = !isMarkdown;
+  $('#modalInsert').disabled = true;
+
+  if (!isMarkdown) return;
+
+  try {
+    const data = await (await fetch('/api/anchors?path=' + encodeURIComponent(file))).json();
+    if (!data.anchors) throw new Error(data.error || '读取失败');
+
+    anchorCache = data.anchors;
+    data.anchors.forEach((anchor, i) => {
+      const option = document.createElement('option');
+      option.value = String(i);
+      option.textContent = anchor.label;
+      select.appendChild(option);
+    });
+  } catch (err) {
+    setStatus('读取插入位置失败：' + err.message, 'err');
+  }
+}
+
+async function postJson(url, payload) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+async function openSelectedFile() {
+  if (!selectedFile) return;
+  setStatus('打开中…', 'busy');
+
+  try {
+    const data = await postJson('/api/open', { path: selectedFile });
+    applyData(data.state);
+    $('#fileModal').hidden = true;
+    setStatus('已打开', 'ok');
+  } catch (err) {
+    setStatus('打开失败：' + err.message, 'err');
+  }
+}
+
+async function insertCurrentChart() {
+  const anchor = anchorCache[Number($('#anchorSel').value)];
+  if (!selectedFile || !anchor) return;
+
+  setStatus('插入中…', 'busy');
+
+  try {
+    const data = await postJson('/api/insert', {
+      path: selectedFile,
+      mode: anchor.mode,
+      line: anchor.line,
+      nodes: state.nodes,
+      option: state.option
+    });
+
+    chartCache = null; // 围栏数变了，下次打开弹窗重新统计
+    applyData(data.state);
+    $('#fileModal').hidden = true;
+    setStatus(`已插入到 ${data.state.file} · 围栏 ${data.index + 1}`, 'ok');
+  } catch (err) {
+    setStatus('插入失败：' + err.message, 'err');
+  }
+}
+
+function bindFileModal() {
+  $('#openFile').addEventListener('click', showFileModal);
+  $('#modalClose').addEventListener('click', () => {
+    $('#fileModal').hidden = true;
+  });
+
+  $('#fileModal').addEventListener('click', (e) => {
+    if (e.target.id === 'fileModal') $('#fileModal').hidden = true;
+  });
+
+  $('#fileSearch').addEventListener('input', renderFileList);
+
+  $('#onlyCharts').addEventListener('change', async () => {
+    try {
+      await ensureFileList();
+      renderFileList();
+    } catch (err) {
+      setStatus('读取文件列表失败：' + err.message, 'err');
+    }
+  });
+
+  $('#fileList').addEventListener('click', (e) => {
+    const item = e.target.closest('.file-item');
+    if (item) pickFile(item.dataset.path);
+  });
+
+  $('#modalOpen').addEventListener('click', openSelectedFile);
+
+  $('#anchorSel').addEventListener('change', (e) => {
+    $('#modalInsert').disabled = !e.target.value;
+  });
+
+  $('#modalInsert').addEventListener('click', insertCurrentChart);
+}
+
+// ---------------------------------------------------------------------------
 // 同步到源码
 // ---------------------------------------------------------------------------
 
 async function save() {
   clearTimeout(state.timer);
+
+  const blocked = persistBlocked();
+  if (blocked) {
+    setStatus(blocked, 'warn');
+    return;
+  }
+
   setStatus('同步中…', 'busy');
 
   try {
-    const res = await fetch('/api/nodes', {
+    const res = await fetch(state.nodeEditable ? '/api/nodes' : '/api/option', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodes: state.nodes, fence: state.fenceIndex })
+      body: JSON.stringify(
+        state.nodeEditable
+          ? { nodes: state.nodes, fence: state.fenceIndex }
+          : { option: state.option, fence: state.fenceIndex }
+      )
     });
     const data = await res.json();
 
@@ -750,6 +1092,12 @@ async function save() {
 
 function scheduleSync() {
   clearTimeout(state.timer);
+
+  const blocked = persistBlocked();
+  if (blocked) {
+    setStatus(blocked, 'warn');
+    return;
+  }
 
   if (!state.autoSync) {
     setStatus('有未保存改动', 'warn');
@@ -786,6 +1134,11 @@ function bindKeyboard() {
     if (meta && e.key.toLowerCase() === 'a' && !typing) {
       e.preventDefault();
       selectAll();
+      return;
+    }
+
+    if (e.key === 'Escape' && !$('#fileModal').hidden) {
+      $('#fileModal').hidden = true;
       return;
     }
 
@@ -826,6 +1179,7 @@ function applyData(data) {
     kind: data.kind || 'js',
     fences: data.fences || [],
     fenceIndex: data.fenceIndex || 0,
+    nodeEditable: data.nodeEditable !== false,
     nodes: data.nodes,
     option: data.option,
     palette: data.palette,
@@ -841,7 +1195,7 @@ function applyData(data) {
   state.history.length = 0;
   state.future.length = 0;
 
-  $('#file').textContent = data.file;
+  $('#file').textContent = data.file || '空白画布';
 
   buildFencePicker();
   applyStage();
@@ -875,7 +1229,68 @@ function buildFencePicker() {
   picker.value = String(state.fenceIndex);
 }
 
+// ---------------------------------------------------------------------------
+// 心跳：关掉页面后让服务端自动退出
+// ---------------------------------------------------------------------------
+
+const CLIENT_ID = 'c' + Math.random().toString(36).slice(2, 10);
+
+function pingServer() {
+  fetch('/api/ping', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: CLIENT_ID }),
+    keepalive: true
+  }).catch(() => {
+    /* 服务端已退出时忽略 */
+  });
+}
+
+function sayBye() {
+  const body = JSON.stringify({ id: CLIENT_ID });
+
+  // sendBeacon 在页面卸载时也能发出去
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon('/api/bye', new Blob([body], { type: 'application/json' }));
+    return;
+  }
+
+  fetch('/api/bye', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true
+  }).catch(() => {});
+}
+
+function bindLiveness() {
+  pingServer();
+  setInterval(pingServer, 5000);
+
+  // 后台标签页的定时器会被节流，切回前台时立刻补一次
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pingServer();
+  });
+
+  // 关标签页 / 刷新 / 跳走都要通知一次
+  let saidBye = false;
+  const byeOnce = () => {
+    if (saidBye) return;
+    saidBye = true;
+    sayBye();
+  };
+
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return; // 进往返缓存不算关闭
+    byeOnce();
+  });
+
+  window.addEventListener('beforeunload', byeOnce);
+}
+
 function bindStatic() {
+  bindLiveness();
+
   window.addEventListener('resize', () => chart && chart.resize());
 
   $('#autoSync').addEventListener('change', (e) => {
@@ -908,6 +1323,8 @@ function bindStatic() {
   $('#redo').addEventListener('click', redo);
   $('#save').addEventListener('click', save);
   $('#add').addEventListener('click', addNode);
+
+  bindFileModal();
 
   $('#fencePicker').addEventListener('change', async (e) => {
     const target = Number(e.target.value);

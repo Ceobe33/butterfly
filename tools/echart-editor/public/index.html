@@ -11,7 +11,8 @@
     <header class="topbar">
       <div class="brand">
         <span class="dot"></span>
-        <strong id="file">echart.js</strong>
+        <strong id="file">空白画布</strong>
+        <button id="openFile" class="btn tiny" title="打开项目文件，或把当前画布插入到某个文件">打开…</button>
         <select id="fencePicker" class="fence-picker" title="选择要编辑的 ```echarts 围栏" hidden></select>
         <span id="status" class="status">加载中…</span>
         <span id="sizeNote" class="size-note">—</span>
@@ -58,7 +59,9 @@
           <button class="btn tiny" data-act="clear">取消选择</button>
         </div>
 
-        <p class="hint">空白处按住拖出选框可多选 · 拖动已选中的点可整体移动 · 方向键微调</p>
+        <p class="hint">
+          空白处拖出选框可多选 · 拖动已选中的点整体移动 · 方向键微调 · 点「打开…」切换项目文件或把当前画布插入到文中
+        </p>
       </section>
 
       <aside class="panel">
@@ -69,6 +72,30 @@
         <div id="nodes" class="nodes"></div>
       </aside>
     </main>
+
+    <div class="modal" id="fileModal" hidden>
+      <div class="modal-box">
+        <div class="modal-head">
+          <span>打开文件 / 新建图表</span>
+          <button class="modal-close" id="modalClose" title="关闭">×</button>
+        </div>
+
+        <div class="modal-tools">
+          <input id="fileSearch" class="modal-search" type="text" placeholder="搜索文件路径…" spellcheck="false" />
+          <label class="chk"><input type="checkbox" id="onlyCharts" /> 只看含图表</label>
+        </div>
+        <div id="fileList" class="file-list"></div>
+
+        <div class="modal-foot">
+          <button id="modalOpen" class="btn primary" disabled>打开</button>
+          <span class="sep"></span>
+          <select id="anchorSel" class="mini-select" disabled>
+            <option value="">插入位置…</option>
+          </select>
+          <button id="modalInsert" class="btn" disabled title="把当前画布作为新的 ```echarts 围栏插入">插入当前图表</button>
+        </div>
+      </div>
+    </div>
 
     <script src="/vendor/echarts.min.js"></script>
     <script src="/app.js"></script>
