@@ -7,10 +7,25 @@
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-10-21
+
 ### Added
 
+- ```echarts 围栏渲染：`scripts/filters/echarts-fence.js` 把文章里的 ```echarts 代码块转成
+  ECharts 图表，`height` 作为容器高度（默认 420），脚本按需从 CDN 加载（`echarts@6`），
+  并跟随浅色/深色主题重新着色
+- 配套的可视化编辑器 `tools/echart-editor/`，用法见该目录的 `README.md`：
+  - `npm run ec` 启动本地服务并自动打开浏览器，可编辑 `echart.js`、纯 JSON option，
+    或 markdown 里指定的 ```echarts 围栏（围栏外内容一字不动）
+  - 画布上拖动节点，右侧改坐标 / 颜色 / 标签方位，改动防抖后自动回写源文件
+  - 框选多选、水平与垂直对齐/分布、批量改色改方位、方向键微调、撤销重做（⌘Z）
+  - 「按博客渲染」模式复刻 `echarts-fence.js` 的 `tune()` 与容器尺寸，与线上所见一致
 - `daily_recommend.enable` 总开关（默认 `true`）。关闭后不再抽取推荐、不写 `source/_data/daily-recommend.json`，
   且 `layout: daily` 的页面会从 `locals.pages` 中移除、不再生成
+
+### Changed
+
+- `package.json` 版本同步为 4.6.0
 
 ## [4.5.0] - 2026-09-29
 
@@ -36,5 +51,6 @@
 
 - `package.json` 版本同步为 4.5.0
 
-[Unreleased]: https://github.com/Ceobe33/butterfly/compare/v4.5.0...HEAD
+[Unreleased]: https://github.com/Ceobe33/butterfly/compare/v4.6.0...HEAD
+[4.6.0]: https://github.com/Ceobe33/butterfly/compare/v4.5.0...v4.6.0
 [4.5.0]: https://github.com/Ceobe33/butterfly/releases/tag/v4.5.0
