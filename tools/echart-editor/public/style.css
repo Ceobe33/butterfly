@@ -320,6 +320,41 @@ main {
   gap: 6px;
 }
 
+/* Without this the rows shrink to fit instead of overflowing, so nothing scrolls */
+.nodes > * {
+  flex: 0 0 auto;
+}
+
+.grip {
+  flex: none;
+  width: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.55;
+}
+
+.grip:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.grip:active {
+  cursor: grabbing;
+}
+
+.row.dragging,
+.data-row.dragging {
+  opacity: 0.4;
+}
+
+.row.drop-target,
+.data-row.drop-target {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
 .notice {
   margin: 8px;
   padding: 10px 12px;
@@ -346,6 +381,18 @@ main {
   color: var(--muted);
   background: #16202b;
   border-bottom: 1px solid var(--line);
+}
+
+.data-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.keep-order {
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .data-row {
@@ -390,6 +437,72 @@ main {
 .data-num:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Sankey: node names and link pickers */
+.data-text {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: #0e161e;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.data-select {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: #0e161e;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.data-text:focus,
+.data-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sankey-link {
+  display: block;
+  padding: 8px 10px;
+}
+
+.link-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.link-line + .link-line {
+  margin-top: 5px;
+}
+
+.data-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.data-sub > span {
+  flex: none;
+  width: 26px;
+}
+
+.add-row {
+  margin: 0 10px 8px;
 }
 
 .row {

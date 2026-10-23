@@ -357,6 +357,76 @@ function evaluate(code) {
   return out;
 }
 
+/**
+ * Fence bodies are hand-written, so they are not always strict JSON: keys may be unquoted,
+ * strings single-quoted, and there can be // comments. JSON.parse only copes with the strict
+ * form, so fall back to evaluating the text as a JS expression.
+ */
+function parseOptionLiteral(text, where = 'option') {
+  const source = String(text).trim().replace(/;\s*$/, '');
+  if (!source) throw new Error(`${where} is empty`);
+
+  try {
+    return JSON.parse(source);
+  } catch (jsonError) {
+    const sandbox = { console };
+    vm.createContext(sandbox);
+
+    try {
+      // trailing newline so a final // comment cannot swallow the closing bracket
+      return vm.runInContext('(' + source + '\n)', sandbox, { timeout: 5000, filename: FILE || 'fence' });
+    } catch (error) {
+      throw new Error(`${where} failed to parse: ${jsonError.message}`);
+    }
+  }
+}
+
+/** Path of the first function in the value, or '' when there is none */
+function findFunction(value, trail = '') {
+  if (typeof value === 'function') return trail || '(root)';
+  if (!value || typeof value !== 'object') return '';
+
+  const keys = Array.isArray(value) ? value.map((_, i) => i) : Object.keys(value);
+
+  for (const key of keys) {
+    const here = Array.isArray(value) ? `${trail}[${key}]` : trail ? `${trail}.${key}` : key;
+    const hit = findFunction(value[key], here);
+    if (hit) return hit;
+  }
+  return '';
+}
+
+/** JSON.stringify drops functions silently, so refuse to rewrite a fence that has any */
+function assertPlain(value, where) {
+  const hit = findFunction(value);
+  if (!hit) return;
+
+  throw new Error(
+    `${where} contains a function at ${hit}, which cannot be written back as JSON. ` +
+      'Replace it with a string (for example a formatter template), or edit that fence by hand.'
+  );
+}
+
+/** Whether the fence body is strict JSON (what the blog's fence filter requires) */
+function isStrictJson(chart) {
+  if (!chart || chart.kind !== 'md') return true;
+
+  let fence;
+  try {
+    fence = findFences(chart.code)[chart.fenceIndex];
+  } catch (err) {
+    return true;
+  }
+  if (!fence) return true;
+
+  try {
+    JSON.parse(fence.body);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 /** Collect the colour constants in the source: const cBlue = '#4BACC6' */
 function parsePalette(code) {
   const re = /^[ \t]*const[ \t]+([A-Za-z_$][\w$]*)[ \t]*=[ \t]*['"](#[0-9a-fA-F]{3,8})['"]/gm;
@@ -496,12 +566,7 @@ function loadChart(fenceIndex = 0) {
     const index = Math.min(Math.max(0, Number(fenceIndex) || 0), fences.length - 1);
     const fence = fences[index];
 
-    let option;
-    try {
-      option = JSON.parse(fence.body);
-    } catch (err) {
-      throw new Error(`JSON in fence ${index + 1} failed to parse: ${err.message}`);
-    }
+    const option = parseOptionLiteral(fence.body, `chart ${index + 1}`);
 
     return {
       kind,
@@ -515,12 +580,7 @@ function loadChart(fenceIndex = 0) {
   }
 
   if (kind === 'json') {
-    let option;
-    try {
-      option = JSON.parse(code);
-    } catch (err) {
-      throw new Error(`JSON parse failed: ${err.message}`);
-    }
+    const option = parseOptionLiteral(code);
     return {
       kind,
       code,
@@ -562,7 +622,10 @@ function writeNodes(incoming, fenceIndex = 0) {
     const fence = findFences(chart.code)[chart.fenceIndex];
     if (!fence) throw new Error('this file has no chart yet — use "Insert current chart" to add one');
 
-    const option = applyNodesToOption(JSON.parse(fence.body), incoming);
+    const current = parseOptionLiteral(fence.body, `chart ${chart.fenceIndex + 1}`);
+    assertPlain(current, `chart ${chart.fenceIndex + 1}`);
+
+    const option = applyNodesToOption(current, incoming);
 
     const body = serializeJson(option)
       .split('\n')
@@ -600,6 +663,9 @@ function writeOption(incoming, fenceIndex = 0) {
   if (chart.kind === 'md') {
     const fence = findFences(chart.code)[chart.fenceIndex];
     if (!fence) throw new Error('this file has no chart yet — use "Insert current chart" first');
+
+    // the fence may hold a JS object literal; serialising it as JSON would drop any function
+    assertPlain(chart.option, `chart ${chart.fenceIndex + 1}`);
 
     const text = serializeJson(incoming);
     const body = text
@@ -922,6 +988,8 @@ function buildState(fenceIndex = 0) {
       label: String(n[4])
     })),
     nodeEditable: chart.nodeEditable !== false,
+    // the blog's fence filter only accepts strict JSON; anything else is left as raw markdown
+    strictJson: chart.kind === 'md' ? isStrictJson(chart) : true,
     option: JSON.parse(JSON.stringify(option)),
     palette: paletteOf(chart),
     axis: {

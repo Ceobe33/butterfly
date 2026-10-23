@@ -566,6 +566,72 @@ function field(labelText, input) {
   return { wrap, input };
 }
 
+/** Move an item within an array, in place */
+function moveItem(list, from, to) {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return false;
+
+  const [item] = list.splice(from, 1);
+  list.splice(to, 0, item);
+  return true;
+}
+
+function gripEl() {
+  const grip = document.createElement('span');
+  grip.className = 'grip';
+  grip.textContent = '⠿';
+  grip.title = 'Drag to reorder';
+  return grip;
+}
+
+/** Drag-to-reorder for a set of panel rows; each row needs a .grip handle */
+function makeReorderable(rows, onMove) {
+  let from = -1;
+  const clearMarks = () => rows.forEach((row) => row.classList.remove('drop-target'));
+
+  rows.forEach((row, index) => {
+    const grip = row.querySelector('.grip');
+    if (!grip) return;
+
+    // Only start a row drag when the grip is grabbed, so inputs stay usable
+    grip.addEventListener('mousedown', () => {
+      row.draggable = true;
+    });
+
+    row.addEventListener('dragstart', (event) => {
+      from = index;
+      row.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(index));
+    });
+
+    row.addEventListener('dragend', () => {
+      row.draggable = false;
+      row.classList.remove('dragging');
+      clearMarks();
+      from = -1;
+    });
+
+    row.addEventListener('dragover', (event) => {
+      if (from < 0 || index === from) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      clearMarks();
+      row.classList.add('drop-target');
+    });
+
+    row.addEventListener('drop', (event) => {
+      if (from < 0 || index === from) return;
+      event.preventDefault();
+
+      const source = from;
+      from = -1;
+      row.draggable = false;
+      clearMarks();
+      onMove(source, index);
+    });
+  });
+}
+
 function makeRow(node) {
   const root = document.createElement('div');
   root.className = 'row';
@@ -589,7 +655,7 @@ function makeRow(node) {
   del.textContent = '×';
   del.title = 'Delete this node';
 
-  top.append(color, name, del);
+  top.append(gripEl(), color, name, del);
 
   const bottom = document.createElement('div');
   bottom.className = 'row-bot';
@@ -696,8 +762,19 @@ function buildDataEditor(box) {
       ? state.option.radar.indicator.map((item) => (item && item.name) || '')
       : [];
 
+  let rendered = 0;
+
   series.forEach((entry, si) => {
-    if (!entry || !Array.isArray(entry.data) || !entry.data.length) return;
+    if (!entry) return;
+
+    // Sankey 的数值在 links 里，单独用节点 / 连线编辑器
+    if (entry.type === 'sankey') {
+      box.appendChild(buildSankeyEditor(entry, `series[${si}]`));
+      rendered++;
+      return;
+    }
+
+    if (!Array.isArray(entry.data) || !entry.data.length) return;
 
     const block = document.createElement('div');
     block.className = 'data-block';
@@ -714,25 +791,280 @@ function buildDataEditor(box) {
       const label = document.createElement('span');
       label.className = 'data-label';
       label.textContent = row && typeof row === 'object' && row.name ? row.name : `#${ri + 1}`;
-      line.appendChild(label);
 
       const group = document.createElement('div');
       group.className = 'data-values';
-      line.appendChild(group);
 
+      line.append(gripEl(), label, group);
       renderValueCells(group, entry.data, ri, indicators);
       block.appendChild(line);
     });
 
+    makeReorderable([...block.querySelectorAll('.data-row')], (from, to) => {
+      if (!moveItem(entry.data, from, to)) return;
+
+      refreshChart();
+      scheduleSync();
+      buildPanel();
+    });
+
     box.appendChild(block);
+    rendered++;
   });
 
-  if (!box.querySelector('.data-num')) {
+  if (!rendered) {
     const empty = document.createElement('p');
     empty.className = 'notice';
     empty.textContent = "No editable numbers in this chart's series.";
     box.appendChild(empty);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sankey: nodes and links
+// ---------------------------------------------------------------------------
+
+const SANKEY_FALLBACK_COLOUR = '#4bacc6';
+
+function hexColour(value) {
+  const text = String(value || '');
+  return /^#[0-9a-f]{6}$/i.test(text) ? text.toLowerCase() : SANKEY_FALLBACK_COLOUR;
+}
+
+/** Reusable "caption + control" line inside a sankey card */
+function sankeyField(caption, control) {
+  const wrap = document.createElement('label');
+  wrap.className = 'data-sub';
+
+  const span = document.createElement('span');
+  span.textContent = caption;
+
+  wrap.append(span, control);
+  return wrap;
+}
+
+/** Dropdown of node names; unknown names are kept so a link is never silently rewired */
+function nodeSelect(nodes, current, onChange) {
+  const select = document.createElement('select');
+  select.className = 'data-select';
+
+  nodes.forEach((node) => {
+    const option = document.createElement('option');
+    option.value = node.name;
+    option.textContent = node.name;
+    select.appendChild(option);
+  });
+
+  if (current && !nodes.some((node) => node.name === current)) {
+    const missing = document.createElement('option');
+    missing.value = current;
+    missing.textContent = current + ' (missing)';
+    select.appendChild(missing);
+  }
+
+  select.value = current || (nodes[0] && nodes[0].name) || '';
+  select.addEventListener('change', () => onChange(select.value));
+  return select;
+}
+
+function buildSankeyEditor(entry, label) {
+  if (!Array.isArray(entry.data)) entry.data = [];
+  if (!Array.isArray(entry.links)) entry.links = [];
+
+  const nodes = entry.data;
+  const links = entry.links;
+
+  const block = document.createElement('div');
+  block.className = 'data-block';
+
+  const commit = () => {
+    refreshChart();
+    scheduleSync();
+  };
+
+  const head = document.createElement('div');
+  head.className = 'data-head data-head-row';
+
+  const title = document.createElement('span');
+  title.textContent = `${label} · sankey · ${nodes.length} nodes / ${links.length} links`;
+
+  // ECharts re-sorts sankey nodes to reduce crossings unless layoutIterations is 0
+  const keep = document.createElement('label');
+  keep.className = 'chk keep-order';
+  keep.title = 'ECharts re-sorts sankey nodes to reduce crossings; tick to keep the order you set';
+
+  const keepBox = document.createElement('input');
+  keepBox.type = 'checkbox';
+  keepBox.checked = entry.layoutIterations === 0;
+  keepBox.addEventListener('change', () => {
+    if (keepBox.checked) entry.layoutIterations = 0;
+    else delete entry.layoutIterations;
+    commit();
+  });
+
+  const keepText = document.createElement('span');
+  keepText.textContent = 'Keep order';
+  keep.append(keepBox, keepText);
+
+  head.append(title, keep);
+  block.appendChild(head);
+
+  // ---- nodes ----
+  const nodeRows = [];
+
+  nodes.forEach((node) => {
+    const row = document.createElement('div');
+    row.className = 'data-row';
+
+    const colour = document.createElement('input');
+    colour.type = 'color';
+    colour.className = 'color';
+    colour.value = hexColour(node.itemStyle && node.itemStyle.color);
+    colour.addEventListener('input', () => {
+      node.itemStyle = { ...(node.itemStyle || {}), color: colour.value };
+      commit();
+    });
+
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.className = 'data-text';
+    name.value = node.name || '';
+    name.addEventListener('change', () => {
+      const next = name.value.trim();
+      const previous = node.name;
+
+      if (!next) {
+        name.value = previous || '';
+        return;
+      }
+      if (next === previous) return;
+
+      node.name = next;
+      // Keep every link pointing at the renamed node
+      links.forEach((link) => {
+        if (link.source === previous) link.source = next;
+        if (link.target === previous) link.target = next;
+      });
+
+      commit();
+      buildPanel(); // option lists need the new name
+    });
+
+    const remove = document.createElement('button');
+    remove.className = 'del';
+    remove.textContent = '×';
+    remove.title = 'Delete this node and every link that touches it';
+    remove.addEventListener('click', () => {
+      const target = node.name;
+      nodes.splice(nodes.indexOf(node), 1);
+
+      for (let i = links.length - 1; i >= 0; i--) {
+        if (links[i].source === target || links[i].target === target) links.splice(i, 1);
+      }
+
+      commit();
+      buildPanel();
+    });
+
+    row.append(gripEl(), colour, name, remove);
+    block.appendChild(row);
+    nodeRows.push(row);
+  });
+
+  makeReorderable(nodeRows, (from, to) => {
+    if (!moveItem(nodes, from, to)) return;
+
+    // Without this the reorder is invisible: the layout engine sorts nodes again
+    if (entry.layoutIterations !== 0) entry.layoutIterations = 0;
+
+    commit();
+    buildPanel();
+  });
+
+  const addNode = document.createElement('button');
+  addNode.className = 'btn tiny add-row';
+  addNode.textContent = '+ node';
+  addNode.addEventListener('click', () => {
+    const used = new Set(nodes.map((node) => node.name));
+    let i = 1;
+    while (used.has('Node ' + i)) i++;
+
+    nodes.push({ name: 'Node ' + i });
+    commit();
+    buildPanel();
+  });
+  block.appendChild(addNode);
+
+  // ---- links ----
+  const linkHead = document.createElement('div');
+  linkHead.className = 'data-head';
+  linkHead.style.borderTop = '1px solid var(--line)';
+  linkHead.textContent = `links · ${links.length}`;
+  block.appendChild(linkHead);
+
+  links.forEach((link) => {
+    const row = document.createElement('div');
+    row.className = 'data-row sankey-link';
+
+    const from = nodeSelect(nodes, link.source, (value) => {
+      link.source = value;
+      commit();
+    });
+
+    const to = nodeSelect(nodes, link.target, (value) => {
+      link.target = value;
+      commit();
+    });
+
+    const value = document.createElement('input');
+    value.type = 'number';
+    value.step = 'any';
+    value.className = 'data-num';
+    value.value = String(link.value ?? 1);
+    value.title = 'flow value';
+    value.addEventListener('input', () => {
+      const next = Number(value.value);
+      if (!Number.isFinite(next)) return;
+      link.value = next;
+      commit();
+    });
+
+    const remove = document.createElement('button');
+    remove.className = 'del';
+    remove.textContent = '×';
+    remove.title = 'Delete this link';
+    remove.addEventListener('click', () => {
+      links.splice(links.indexOf(link), 1);
+      commit();
+      buildPanel();
+    });
+
+    const first = document.createElement('div');
+    first.className = 'link-line';
+    first.append(sankeyField('from', from), remove);
+
+    const second = document.createElement('div');
+    second.className = 'link-line';
+    second.append(sankeyField('to', to), value);
+
+    row.append(first, second);
+    block.appendChild(row);
+  });
+
+  const addLink = document.createElement('button');
+  addLink.className = 'btn tiny add-row';
+  addLink.textContent = '+ link';
+  addLink.disabled = nodes.length < 2;
+  addLink.addEventListener('click', () => {
+    const source = nodes[nodes.length - 2];
+    const target = nodes[nodes.length - 1];
+    links.push({ source: source.name, target: target.name, value: 1 });
+    commit();
+    buildPanel();
+  });
+  block.appendChild(addLink);
+
+  return block;
 }
 
 /** A row may be a number, an array of numbers or {value: ...}; all become inputs */
@@ -815,7 +1147,7 @@ function buildPanel() {
   if (!state.nodeEditable) {
     const notice = document.createElement('p');
     notice.className = 'notice';
-    notice.textContent = 'This chart has no scatter nodes, so edit the numbers below.';
+    notice.textContent = 'This chart has no scatter nodes, so edit its data directly below.';
     box.appendChild(notice);
 
     buildDataEditor(box);
@@ -835,6 +1167,19 @@ function buildPanel() {
   });
 
   $('#count').textContent = state.nodes.length;
+
+  makeReorderable(
+    state.rows.map((row) => row.root),
+    (from, to) => {
+      pushHistory();
+      if (!moveItem(state.nodes, from, to)) return;
+
+      buildPanel();
+      refreshUI();
+      scheduleSync();
+    }
+  );
+
   updateRowStates();
 }
 
@@ -1084,6 +1429,10 @@ async function save() {
     const data = await res.json();
 
     if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+
+    // the body is rewritten as strict JSON, so the blog's fence filter can pick it up again
+    if (state.kind === 'md') state.strictJson = true;
+
     setStatus('Synced ' + data.savedAt, 'ok');
   } catch (err) {
     setStatus('Sync failed: ' + err.message, 'err');
@@ -1105,7 +1454,14 @@ function scheduleSync() {
   }
 
   setStatus('Syncing…', 'busy');
-  state.timer = setTimeout(save, 350);
+  state.timer = setTimeout(() => {
+    state.timer = null;
+
+    // 排队这段时间里可能被取消了自动同步，到点再确认一次
+    if (!state.autoSync) return;
+
+    save();
+  }, 350);
 }
 
 // ---------------------------------------------------------------------------
@@ -1180,6 +1536,7 @@ function applyData(data) {
     fences: data.fences || [],
     fenceIndex: data.fenceIndex || 0,
     nodeEditable: data.nodeEditable !== false,
+    strictJson: data.strictJson !== false,
     nodes: data.nodes,
     option: data.option,
     palette: data.palette,
@@ -1194,6 +1551,10 @@ function applyData(data) {
   state.selected.clear();
   state.history.length = 0;
   state.future.length = 0;
+
+  // 切换文件/围栏时丢掉排队中的写入，否则旧数据会被写进新打开的文件
+  clearTimeout(state.timer);
+  state.timer = null;
 
   $('#file').textContent = data.file || 'Blank canvas';
 
@@ -1295,7 +1656,16 @@ function bindStatic() {
 
   $('#autoSync').addEventListener('change', (e) => {
     state.autoSync = e.target.checked;
-    if (state.autoSync) scheduleSync();
+
+    if (state.autoSync) {
+      scheduleSync();
+      return;
+    }
+
+    // 关掉自动同步时，把已经排队的写入一并取消，否则 350ms 后仍会写文件
+    clearTimeout(state.timer);
+    state.timer = null;
+    setStatus('Auto-sync off — ⌘S to save', 'warn');
   });
 
   $('#grid').addEventListener('change', (e) => {
@@ -1332,7 +1702,7 @@ function bindStatic() {
 
     try {
       applyData(await loadState(target));
-      setStatus('Loaded', 'ok');
+      loadedStatus();
     } catch (err) {
       setStatus('Switch failed: ' + err.message, 'err');
     }
@@ -1355,10 +1725,19 @@ function bindStatic() {
   bindKeyboard();
 }
 
+/** The blog's fence filter only parses strict JSON; anything else is skipped there */
+function loadedStatus() {
+  if (state.strictJson === false) {
+    setStatus('Not strict JSON — the blog skips this chart; saving rewrites it', 'warn');
+    return;
+  }
+  setStatus('Loaded', 'ok');
+}
+
 async function boot() {
   bindStatic();
   applyData(await loadState(0));
-  setStatus('Loaded', 'ok');
+  loadedStatus();
 }
 
 boot().catch((err) => setStatus('Failed to load: ' + err.message, 'err'));

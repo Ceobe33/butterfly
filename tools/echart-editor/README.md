@@ -54,6 +54,14 @@ then becomes the current target, and further edits sync automatically.
 When one markdown file holds several charts, the dropdown in the top bar lists every fence by
 “number · line · nearest heading”, and switching loads that chart.
 
+Fence bodies are read leniently: strict JSON first, then a JS object literal, so hand-written
+charts with unquoted keys, single quotes or `// comments` still open. That leniency is only on the
+reading side — `echarts-fence.js` on the blog needs strict JSON and silently skips anything else.
+The status bar flags such a fence with “Not strict JSON”, and the first save rewrites the body as
+JSON, which both fixes the article and drops the comments inside the fence. A fence containing a
+function (for example `formatter: function (p) { ... }`) is refused instead of being rewritten,
+because `JSON.stringify` would drop it without a word.
+
 Node data is always taken from the series whose `type` is `scatter`: position, name, colour and
 label position are edited point by point. Any `line` series is rebuilt from the node order and
 closed back to its starting point.
@@ -66,6 +74,11 @@ closed back to its starting point.
 - **Align and distribute** — a toolbar floats up once something is selected: align level (same Y),
   align upright (same X), distribute across (even X spacing) and distribute down (even Y spacing);
   the outermost points stay put
+- **Reorder** — grab the ⠿ handle on the left of a row and drag it up or down. The row order is the
+  order in the data, so it decides the stacking of sankey nodes and the path order of a line series.
+  Sankey needs one extra nudge: ECharts normally re-sorts nodes to reduce crossings, so the first
+  drag also sets `layoutIterations: 0` (shown as the “Keep order” box in the panel header). Untick
+  it to hand the layout back to ECharts.
 - **Bulk edits** — change colour, label position or delete every selected node at once
 - **Nudge** — arrow keys move by 0.1, `Shift` plus an arrow by 0.5
 - **Undo / redo** — `⌘Z` and `⇧⌘Z`
@@ -110,7 +123,8 @@ tools/echart-editor/
 ```
 
 For JS sources the server runs the file in a `vm` to pull out the real `option`; JSON and markdown
-are simply `JSON.parse`d. Writes go through a temporary file and a rename, so a half-written file
+go through `parseOptionLiteral()`, which tries `JSON.parse` and then falls back to evaluating the
+text as an expression. Writes go through a temporary file and a rename, so a half-written file
 is never left behind.
 
 ## Known limitations
@@ -122,3 +136,7 @@ is never left behind.
 - Charts with a `scatter` series are edited node by node. Radar and pie charts switch to **data
   mode** instead, listing the numbers in `series` on the right (radar values follow the indicator
   order and show the indicator name on hover). Those edits are written back the same way.
+- **Sankey** charts get their own editor: every node has a name field and a colour well, and every
+  link has `from`/`to` dropdowns plus its flow value. Renaming a node rewires the links that touch
+  it, and deleting a node takes its links with it, so the chart never ends up with a dangling
+  reference. “+ node” and “+ link” add new entries.
