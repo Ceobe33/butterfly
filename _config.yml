@@ -1139,3 +1139,15 @@ daily_recommend:
   max_count: 10
   # 前端默认展示的篇数
   default_count: 3
+
+# Tag Sphere (标签页的 3D 标签球)
+# see source/js/tag-sphere.js
+tag_sphere:
+  # 总开关。false: 标签页退回普通标签云
+  enable: true
+  # 景深方向：哪一面清晰、哪一面淡出
+  # front: 正面清晰、背面淡出（默认，符合真实观感）
+  # back:  反面清晰、正面淡出（X 光效果）
+  depth: front
+  # 淡出那一侧的不透明度下限，0–1
+  min_opacity: 0.3

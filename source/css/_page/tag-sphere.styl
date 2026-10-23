@@ -1,0 +1,57 @@
+// 标签球（3D tag sphere）
+.tag-sphere
+  position: relative
+  width: 100%
+  height: 520px
+  user-select: none
+  -webkit-user-select: none
+
+  +maxWidth768()
+    height: 420px
+
+  canvas
+    display: block
+    width: 100%
+    height: 100%
+    cursor: grab
+    touch-action: none
+
+  &.is-dragging canvas
+    cursor: grabbing
+
+.tag-sphere-tip
+  position: absolute
+  top: 0
+  left: 0
+  z-index: 2
+  padding: 4px 9px
+  border-radius: 6px
+  font-size: 12px
+  line-height: 1.5
+  white-space: nowrap
+  pointer-events: none
+  opacity: 0
+  transition: opacity 0.15s ease
+  color: var(--font-color)
+  background: var(--card-bg)
+  border: 1px solid var(--text-highlight-color)
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16)
+
+  &[data-show]
+    opacity: 1
+
+  b
+    font-weight: 600
+    color: var(--text-highlight-color)
+
+// 给读屏和爬虫留一份真实链接
+.tag-sphere-sr
+  position: absolute
+  width: 1px
+  height: 1px
+  padding: 0
+  margin: -1px
+  overflow: hidden
+  clip: rect(0, 0, 0, 0)
+  border: 0
+  white-space: nowrap

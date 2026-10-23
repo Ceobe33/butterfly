@@ -5,7 +5,47 @@
 格式基于 [Keep a Changelog 1.1.0](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning 2.0.0](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+尚未发布的改动放在最上面，**按日期分组**：每个日期下再分 Added / Changed / Fixed，新的一天加在最上面。
+已发布的版本仍以版本号为节，节标题里带发布日期。日期取改动落地那天，不是写记录的日期。
+
+## 2026-10-23
+
+### Added
+
+- 标签页改为 **3D 标签球**（`source/js/tag-sphere.js` + `css/_page/tag-sphere.styl`）：
+  标签按 Fibonacci 球面均匀分布，可拖拽旋转（带惯性）并缓慢自转；悬停显示该标签的文章数，
+  点击进入标签页；字号随文章数缩放，颜色按色相铺开，深浅主题自动换色。
+  canvas 之外另输出一份 sr-only 链接列表，读屏与爬虫仍能拿到真实链接与计数。
+  行为在 `tag_sphere` 下配置：`enable`（关掉后退回主题原有的标签云）、
+  `depth`（`front` / `back`，决定哪一面清晰）、`min_opacity`（淡出那侧的不透明度下限）
+- 编辑器右侧列表支持**拖拽排序**（每行左侧 ⠿ 手柄），顺序即数据顺序：影响 sankey 同层节点的
+  堆叠次序、折线图的连线走向。桑基图首次拖动会自动把 `layoutIterations` 置 0，否则 ECharts
+  会重新排序以减少连线交叉，拖动结果在画面上看不出来；面板表头的「Keep order」可关闭该锁定
+- 可视化编辑器支持 **sankey** 图：节点可改名、改色、增删，连线可用下拉选择起止节点并改流量值；
+  改名会自动同步相关连线，删节点会一并删掉挂在它上面的连线，避免产生孤立引用
+
+### Fixed
+
+- 编辑器打不开用 **JS 对象字面量**写的 ```echarts 围栏（键没引号、单引号、`//` 注释），
+  报 `Expected property name or '}'`：解析改为先 `JSON.parse`，失败再按表达式求值。
+  顺带提示这类围栏在博客端 `echarts-fence.js` 里同样会被跳过（它只认严格 JSON），
+  状态栏显示 “Not strict JSON”；保存会重写成标准 JSON，既修好文章也丢掉围栏内的注释。
+  含 `function` 的围栏（如 `formatter: function (p) {...}`）拒绝回写并给出路径，
+  避免 `JSON.stringify` 静默丢弃函数
+- 标签球的景深方向反了：透视用的是 `fov / (fov + z * radius)`，`z` 越小离观察者越近，
+  但透明度按 `0.3 + 0.7 * ((z + 1) / 2)` 算，结果是**背面不透明、正面只有 0.3**。
+  改为按 `near = (1 - z) / 2` 取值，正面清晰、背面淡出；新增 `tag_sphere.depth`
+  （`front` / `back`）可整页翻转，改 `#tag-sphere` 的 `data-depth` 也能实时预览；
+  淡出那侧的下限由 `tag_sphere.min_opacity`（默认 0.3）控制
+- 编辑器取消勾选「Auto-sync」后仍会写文件：防抖定时器在取消勾选前已经排好，到点照常执行。
+  现在取消勾选会清掉排队中的写入，定时器触发时也会再确认一次开关状态；
+  切换文件/围栏时同样丢弃排队写入，避免旧数据被写进新打开的文件
+- `random_cover` 遇到非字符串的 `cover`（例如 front-matter 手误写成 `cover: 33`）不再让整个
+  构建 FATAL，改为打印警告并跳过该字段
+- 编辑器右侧面板无法滚动：`.nodes` 是 flex 列容器，子项默认被压缩到容器高度而不是溢出，
+  导致 `scrollHeight` 恒等于 `clientHeight`；补 `flex: 0 0 auto` 后行高不再被压扁
+
+## 2026-10-21
 
 ### Added
 
@@ -19,6 +59,7 @@
   （用 grep 单进程扫描并在启动时预热，1000+ 篇文章约 0.3 秒）
 - 关闭浏览器页面后服务自动退出：页面用 `sendBeacon` 通知，3 秒宽限（刷新不误杀），
   浏览器崩溃等异常情况以 120 秒无心跳兜底；新增 `--keep-alive` 保持常驻
+- 编辑器整体文案改为英式英语（界面、终端输出、README）
 
 ### Changed
 
@@ -74,6 +115,5 @@
 
 - `package.json` 版本同步为 4.5.0
 
-[Unreleased]: https://github.com/Ceobe33/butterfly/compare/v4.6.0...HEAD
 [4.6.0]: https://github.com/Ceobe33/butterfly/compare/v4.5.0...v4.6.0
 [4.5.0]: https://github.com/Ceobe33/butterfly/releases/tag/v4.5.0
