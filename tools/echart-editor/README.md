@@ -88,6 +88,25 @@ closed back to its starting point.
 Edits are debounced by 350ms and then written back, with the result shown in the status bar. Turn
 off “Auto-sync” to save by hand instead.
 
+## Tree charts
+
+A fence whose series is a `tree` (an org chart) opens in a hierarchy editor instead of the node
+list:
+
+- **Scale and layout** — canvas height (written back as the option's `height`, which is what the
+  blog reads to size the container), label font size, line height, padding, line width, node size,
+  `initialTreeDepth` (how many levels start expanded) and the `top/left/bottom/right` box. A tree
+  too large to fit is usually fixed by raising the canvas height, then lowering the font size and
+  the padding.
+- **Hierarchy** — every node is listed indented by its depth. The name field renames it; “父级”
+  moves the node and its subtree under another one, and the dropdown never offers the node's own
+  descendants, so the tree cannot be made circular; ↑ / ↓ reorder it among its siblings, which is
+  what decides its vertical position. “+” adds a child, “×” deletes the node and everything below
+  it. Clicking a node on the canvas highlights its row.
+
+The whole option is rewritten on save, so everything except the fields you touch is preserved
+verbatim.
+
 ## Matching what the blog renders
 
 The editor deliberately mirrors the blog's rendering environment, so a chart does not look one
@@ -103,6 +122,12 @@ way while you edit it and another once published:
 
 “Render as blog” switches back to the raw option for comparison, and “Dark” mirrors the blog's dark
 theme. Neither toggle is ever written to the file.
+
+On a narrow window the canvas gives up the 786px column and takes whatever width is left, which is
+what the post column itself does on a phone, so the chart re-lays itself out instead of scrolling
+sideways. The size note then reads “· fitted”. Below 820px the node panel moves under the canvas,
+the top bar wraps, and the canvas gets `touch-action: none` so dragging a point does not pan the
+page.
 
 > One thing worth knowing: because the theme forces `backgroundColor` to `transparent`, any
 > background colour set in the option has no effect on the live site. Palettes that rely on a dark
@@ -136,6 +161,8 @@ is never left behind.
 - Charts with a `scatter` series are edited node by node. Radar and pie charts switch to **data
   mode** instead, listing the numbers in `series` on the right (radar values follow the indicator
   order and show the indicator name on hover). Those edits are written back the same way.
+- **Tree** charts get the hierarchy editor described above; titles, legends and any styling other
+  than the fields in that panel still have to be edited in the source file.
 - **Sankey** charts get their own editor: every node has a name field and a colour well, and every
   link has `from`/`to` dropdowns plus its flow value. Renaming a node rewires the links that touch
   it, and deleting a node takes its links with it, so the chart never ends up with a dangling

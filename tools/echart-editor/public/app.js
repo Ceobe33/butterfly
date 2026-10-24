@@ -33,6 +33,8 @@ const state = {
 };
 
 let chart;
+let treeRows = new Map(); // tree node → its row in the panel, for canvas clicks
+let treeSelectedRow = null;
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -60,7 +62,11 @@ function persistBlocked() {
 // ---------------------------------------------------------------------------
 
 function snapshot() {
-  return state.nodes.map((n) => ({ ...n }));
+  // scatter charts are restored from nodes; a tree has to carry its whole series along
+  return {
+    nodes: state.nodes.map((n) => ({ ...n })),
+    series: treeEntry() ? JSON.parse(JSON.stringify(state.option.series)) : null
+  };
 }
 
 function pushHistory() {
@@ -89,9 +95,10 @@ function redo() {
   restore(state.future.pop());
 }
 
-function restore(nodes) {
+function restore(snap) {
   const keys = new Set([...state.selected].map((n) => n.key));
-  state.nodes = nodes;
+  state.nodes = snap.nodes;
+  if (snap.series) state.option.series = snap.series;
   state.selected = new Set(state.nodes.filter((n) => keys.has(n.key)));
   buildPanel();
   refreshUI();
@@ -209,16 +216,29 @@ function blogTune(option, dark) {
   return out;
 }
 
+/** The post column is 786px wide, but on a narrow screen it is the viewport that decides */
+function stageWidth() {
+  const wrap = $('#stage').parentElement;
+  const style = getComputedStyle(wrap);
+  const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const available = Math.floor(wrap.clientWidth - padding);
+
+  if (!available) return ARTICLE_WIDTH;
+
+  return Math.max(240, Math.min(ARTICLE_WIDTH, available));
+}
+
 /** Canvas size matches the blog: width of #article-container .echarts-wrap, height from the height field */
 function applyStage() {
   const stage = $('#stage');
-  const height = Number(state.option.height) || 420;
+  const height = Number(state.option && state.option.height) || 420;
+  const width = stageWidth();
 
-  stage.style.width = ARTICLE_WIDTH + 'px';
+  stage.style.width = width + 'px';
   stage.style.height = height + 'px';
   stage.dataset.mode = state.blogMode ? (state.dark ? 'dark' : 'light') : 'raw';
 
-  $('#sizeNote').textContent = ARTICLE_WIDTH + ' × ' + height + 'px';
+  $('#sizeNote').textContent = width + ' × ' + height + 'px' + (width === ARTICLE_WIDTH ? '' : ' · fitted');
 
   if (chart) chart.resize();
 }
@@ -333,10 +353,27 @@ function applyMarquee(rect, additive) {
   state.selected = additive ? new Set([...state.selected, ...picked]) : new Set(picked);
 }
 
+/** Tapping a tree node on the canvas highlights its row in the panel */
+function bindTreeClicks() {
+  chart.on('click', (params) => {
+    if (!params || !treeRows.size) return;
+
+    const row = treeRows.get(params.data);
+    if (!row) return;
+
+    if (treeSelectedRow) treeSelectedRow.classList.remove('selected');
+    treeSelectedRow = row;
+    row.classList.add('selected');
+    row.scrollIntoView({ block: 'nearest' });
+  });
+}
+
 function bindZr() {
   const zr = chart.getZr();
 
   zr.on('mousedown', (e) => {
+    if (!state.nodeEditable) return;
+
     const hit = pickNode(e.offsetX, e.offsetY);
     const shift = Boolean(e.event && e.event.shiftKey);
 
@@ -374,6 +411,8 @@ function bindZr() {
   });
 
   zr.on('mousemove', (e) => {
+    if (!state.nodeEditable) return;
+
     const drag = state.drag;
 
     if (!drag) {
@@ -774,6 +813,13 @@ function buildDataEditor(box) {
       return;
     }
 
+    // 树图没有数值，编辑的是层级、比例和布局
+    if (entry.type === 'tree') {
+      box.appendChild(buildTreeEditor(entry, `series[${si}]`));
+      rendered++;
+      return;
+    }
+
     if (!Array.isArray(entry.data) || !entry.data.length) return;
 
     const block = document.createElement('div');
@@ -1137,22 +1183,346 @@ function renderValueCells(container, data, index, indicators) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Tree: scale, hierarchy and layout
+// ---------------------------------------------------------------------------
+
+/** The first tree series in the option, if this chart has one */
+function treeEntry() {
+  const series = Array.isArray(state.option && state.option.series) ? state.option.series : [];
+  const index = series.findIndex((entry) => entry && entry.type === 'tree');
+
+  return index < 0 ? null : { index, entry: series[index] };
+}
+
+function treeRoots(entry) {
+  if (!Array.isArray(entry.data)) {
+    entry.data = entry.data && typeof entry.data === 'object' ? [entry.data] : [];
+  }
+
+  return entry.data;
+}
+
+/** Depth-first walk: every node with its depth, parent and position among its siblings */
+function flattenTree(nodes, depth, parent, out) {
+  const list = out || [];
+
+  (Array.isArray(nodes) ? nodes : []).forEach((node, index) => {
+    if (!node || typeof node !== 'object') return;
+
+    list.push({ node, depth: depth || 0, parent: parent || null, index });
+    flattenTree(node.children, (depth || 0) + 1, node, list);
+  });
+
+  return list;
+}
+
+function childListOf(parent, roots) {
+  if (!parent) return roots;
+
+  if (!Array.isArray(parent.children)) parent.children = [];
+  return parent.children;
+}
+
+/** Everything hanging below a node — a re-parent may not point into its own subtree */
+function descendantsOf(node) {
+  const out = new Set();
+
+  flattenTree(node.children, 0, node).forEach((item) => out.add(item.node));
+
+  return out;
+}
+
+function detachNode(node, roots) {
+  const lists = [roots];
+
+  flattenTree(roots, 0, null).forEach((item) => {
+    if (Array.isArray(item.node.children)) lists.push(item.node.children);
+  });
+
+  lists.forEach((list) => {
+    const at = list.indexOf(node);
+    if (at >= 0) list.splice(at, 1);
+  });
+}
+
+/** caption + input, matching the look of the scatter node rows */
+function treeField(caption, control) {
+  const field = document.createElement('label');
+  field.className = 'field';
+
+  const span = document.createElement('span');
+  span.textContent = caption;
+
+  field.append(span, control);
+  return field;
+}
+
+function treeNumber(caption, value, apply, options) {
+  const opts = options || {};
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.step = String(opts.step || 1);
+  input.value = value == null || value === '' ? '' : String(value);
+
+  input.addEventListener('change', () => {
+    const next = Number(input.value);
+    if (!Number.isFinite(next)) return;
+
+    const lo = opts.min == null ? -Infinity : opts.min;
+    const hi = opts.max == null ? Infinity : opts.max;
+
+    pushHistoryOnce();
+    apply(Math.min(hi, Math.max(lo, next)));
+    refreshChart();
+    scheduleSync();
+  });
+
+  return treeField(caption, input);
+}
+
+function treeText(caption, value, apply) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value == null ? '' : String(value);
+
+  input.addEventListener('change', () => {
+    pushHistoryOnce();
+    apply(input.value.trim());
+    refreshChart();
+    scheduleSync();
+  });
+
+  return treeField(caption, input);
+}
+
+/** One hierarchy row: name, parent, order among siblings, add child, delete */
+function makeTreeRow(item, roots, rebuild) {
+  const node = item.node;
+  const parent = item.parent;
+
+  const row = document.createElement('div');
+  row.className = 'tree-row';
+  row.style.setProperty('--depth', String(Math.min(item.depth, 8)));
+
+  const top = document.createElement('div');
+  top.className = 'tree-row-top';
+
+  const name = document.createElement('input');
+  name.className = 'data-text';
+  name.value = node.name == null ? '' : String(node.name);
+  name.title = 'Rename this node';
+  name.addEventListener('change', () => {
+    pushHistoryOnce();
+    node.name = name.value;
+    refreshChart();
+    scheduleSync();
+  });
+
+  const addChild = document.createElement('button');
+  addChild.className = 'tree-btn';
+  addChild.textContent = '+';
+  addChild.title = 'Add a node one level below this one';
+  addChild.addEventListener('click', () => {
+    pushHistory();
+    childListOf(node, roots).push({ name: '新节点' });
+    node.collapsed = false; // otherwise a collapsed branch hides the new child
+    rebuild();
+    scheduleSync();
+  });
+
+  const del = document.createElement('button');
+  del.className = 'tree-btn del';
+  del.textContent = '×';
+  del.title = 'Delete this node and everything under it';
+  del.addEventListener('click', () => {
+    pushHistory();
+    detachNode(node, roots);
+    rebuild();
+    scheduleSync();
+  });
+
+  top.append(name, addChild, del);
+
+  const bot = document.createElement('div');
+  bot.className = 'tree-row-bot';
+
+  const cap = document.createElement('span');
+  cap.className = 'tree-cap';
+  cap.textContent = '父级';
+
+  const blocked = descendantsOf(node);
+  blocked.add(node);
+
+  const candidates = flattenTree(roots, 0, null).filter((other) => !blocked.has(other.node));
+
+  const parentSel = document.createElement('select');
+  parentSel.className = 'data-select';
+  parentSel.title = 'Move this node under another one';
+
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = '— 顶层 —';
+  parentSel.appendChild(none);
+
+  candidates.forEach((other, at) => {
+    const option = document.createElement('option');
+    option.value = String(at);
+    option.textContent = '  '.repeat(other.depth) + (other.node.name || '(未命名)');
+    parentSel.appendChild(option);
+  });
+
+  const parentAt = candidates.findIndex((other) => other.node === parent);
+  parentSel.value = parentAt < 0 ? '' : String(parentAt);
+
+  parentSel.addEventListener('change', () => {
+    const target = parentSel.value === '' ? null : candidates[Number(parentSel.value)].node;
+    if (!target && !parent) return;
+
+    pushHistory();
+    detachNode(node, roots);
+    childListOf(target, roots).push(node);
+    if (target) target.collapsed = false;
+    rebuild();
+    scheduleSync();
+  });
+
+  const move = (delta) => () => {
+    const list = childListOf(parent, roots);
+    const at = list.indexOf(node);
+    const to = at + delta;
+
+    if (at < 0 || to < 0 || to >= list.length) return;
+
+    pushHistory();
+    list.splice(at, 1);
+    list.splice(to, 0, node);
+    rebuild();
+    scheduleSync();
+  };
+
+  const up = document.createElement('button');
+  up.className = 'tree-btn';
+  up.textContent = '↑';
+  up.title = 'Move up among its siblings';
+  up.addEventListener('click', move(-1));
+
+  const down = document.createElement('button');
+  down.className = 'tree-btn';
+  down.textContent = '↓';
+  down.title = 'Move down among its siblings';
+  down.addEventListener('click', move(1));
+
+  bot.append(cap, parentSel, up, down);
+
+  row.append(top, bot);
+  treeRows.set(node, row);
+
+  return row;
+}
+
+function buildTreeEditor(entry, label) {
+  const roots = treeRoots(entry);
+  const flat = flattenTree(roots, 0, null);
+
+  if (!entry.label || typeof entry.label !== 'object') entry.label = {};
+  if (!entry.lineStyle || typeof entry.lineStyle !== 'object') entry.lineStyle = {};
+
+  const block = document.createElement('div');
+  block.className = 'data-block';
+
+  const head = document.createElement('div');
+  head.className = 'data-head';
+  head.textContent = `${label} · tree · ${flat.length} nodes`;
+  block.appendChild(head);
+
+  // --- size and layout ------------------------------------------------------
+  const grid = document.createElement('div');
+  grid.className = 'tree-grid';
+
+  const pad = Array.isArray(entry.label.padding) ? entry.label.padding : null;
+  const padAt = (at) => (pad ? pad[at] : entry.label.padding);
+
+  const setPad = (at) => (next) => {
+    const current = Array.isArray(entry.label.padding)
+      ? entry.label.padding.slice()
+      : [entry.label.padding || 0, entry.label.padding || 0];
+
+    current[at] = next;
+    entry.label.padding = current;
+  };
+
+  grid.append(
+    // the container height is the option's "height" field, exactly as the blog reads it
+    treeNumber('画布高', Number(state.option.height) || 420, (next) => {
+      state.option.height = next;
+      applyStage();
+    }, { min: 160, max: 2000, step: 20 }),
+    treeNumber('字号', entry.label.fontSize, (next) => {
+      entry.label.fontSize = next;
+    }, { min: 4, max: 64 }),
+    treeNumber('行高', entry.label.lineHeight, (next) => {
+      entry.label.lineHeight = next;
+    }, { min: 0, max: 200 }),
+    treeNumber('上下', padAt(0), setPad(0), { min: 0, max: 200 }),
+    treeNumber('左右', padAt(1), setPad(1), { min: 0, max: 200 }),
+    treeNumber('线宽', entry.lineStyle.width, (next) => {
+      entry.lineStyle.width = next;
+    }, { min: 0, max: 40 }),
+    treeNumber('节点', entry.symbolSize, (next) => {
+      entry.symbolSize = next;
+    }, { min: 0, max: 60 }),
+    treeNumber('层级', entry.initialTreeDepth, (next) => {
+      entry.initialTreeDepth = next;
+    }, { min: 0, max: 20 }),
+    treeText('上', entry.top, (next) => {
+      entry.top = next;
+    }),
+    treeText('下', entry.bottom, (next) => {
+      entry.bottom = next;
+    }),
+    treeText('左', entry.left, (next) => {
+      entry.left = next;
+    }),
+    treeText('右', entry.right, (next) => {
+      entry.right = next;
+    })
+  );
+
+  block.appendChild(grid);
+
+  // --- hierarchy ------------------------------------------------------------
+  const list = document.createElement('div');
+  list.className = 'tree-list';
+
+  flat.forEach((item) => list.appendChild(makeTreeRow(item, roots, buildPanel)));
+
+  block.appendChild(list);
+
+  return block;
+}
+
 function buildPanel() {
   const box = $('#nodes');
   box.innerHTML = '';
   state.rows = [];
   state.rowMap = new Map();
+  treeRows = new Map();
 
   // No scatter nodes: fall back to editing the numbers
   if (!state.nodeEditable) {
     const notice = document.createElement('p');
     notice.className = 'notice';
-    notice.textContent = 'This chart has no scatter nodes, so edit its data directly below.';
+    notice.textContent = treeEntry()
+      ? 'Tree chart: edit the hierarchy, the node scale and the layout box below.'
+      : 'This chart has no scatter nodes, so edit its data directly below.';
     box.appendChild(notice);
 
     buildDataEditor(box);
 
-    $('#count').textContent = '0';
+    const tree = treeEntry();
+    $('#count').textContent = tree ? String(flattenTree(treeRoots(tree.entry), 0, null).length) : '0';
     $('#add').disabled = true;
     return;
   }
@@ -1564,6 +1934,7 @@ function applyData(data) {
   if (!chart) {
     chart = echarts.init($('#chart'), null, { renderer: 'canvas' });
     bindZr();
+    bindTreeClicks();
   }
 
   buildPanel();
@@ -1652,7 +2023,12 @@ function bindLiveness() {
 function bindStatic() {
   bindLiveness();
 
-  window.addEventListener('resize', () => chart && chart.resize());
+  // the stage width follows the window, so re-measure rather than only resizing the chart
+  window.addEventListener('resize', () => {
+    if (!state.option) return;
+
+    applyStage();
+  });
 
   $('#autoSync').addEventListener('change', (e) => {
     state.autoSync = e.target.checked;
