@@ -62,10 +62,12 @@ function persistBlocked() {
 // ---------------------------------------------------------------------------
 
 function snapshot() {
-  // scatter charts are restored from nodes; a tree has to carry its whole series along
+  // scatter charts are restored from nodes; data-mode charts (tree, radar, sankey…) carry their series along
+  const fromSeries = !state.nodeEditable || treeEntry();
+
   return {
     nodes: state.nodes.map((n) => ({ ...n })),
-    series: treeEntry() ? JSON.parse(JSON.stringify(state.option.series)) : null
+    series: fromSeries ? JSON.parse(JSON.stringify(state.option.series || [])) : null
   };
 }
 
@@ -180,6 +182,33 @@ const ARTICLE_WIDTH = 786;
  * Matches tune() in themes/butterfly/scripts/filters/echarts-fence.js:
  * background forced transparent; text, axis lines and grid recoloured for light and dark.
  */
+/**
+ * Radar tooltips only ever describe the polygon you hit, so the upper series hides the lower one.
+ * The blog replaces the "<radar>" marker with this; the editor mirrors it so the preview matches.
+ */
+function radarTooltip(option) {
+  const labels = ((option.radar && option.radar.indicator) || []).map((item) => (item && item.name) || '');
+  const series = (option.series || []).filter((entry) => entry && entry.type === 'radar');
+  const names = series.map((entry) => entry.name);
+
+  return (params) => {
+    const index = params.dataIndex == null ? 0 : params.dataIndex;
+    const head = (params.data && params.data.name) || params.seriesName || '';
+
+    const rows = labels.map((label, i) => {
+      const cells = series.map((entry) => {
+        const datum = (entry.data || [])[index] || {};
+        const value = Array.isArray(datum.value) ? datum.value[i] : datum.value;
+        return (entry.name ? entry.name + ' ' : '') + (value == null ? '-' : value);
+      });
+
+      return label + '：' + cells.join(' ｜ ');
+    });
+
+    return (names.indexOf(head) < 0 ? [head] : []).concat(rows).join('<br/>');
+  };
+}
+
 function blogTune(option, dark) {
   const out = JSON.parse(JSON.stringify(option));
 
@@ -191,6 +220,11 @@ function blogTune(option, dark) {
 
   out.backgroundColor = 'transparent';
   out.textStyle = Object.assign({ color: text }, out.textStyle);
+
+  // mirrors the "<radar>" marker in scripts/filters/echarts-fence.js
+  if (out.tooltip && out.tooltip.formatter === '<radar>') {
+    out.tooltip.formatter = radarTooltip(out);
+  }
 
   if (out.legend) {
     out.legend.textStyle = Object.assign({ color: text }, out.legend.textStyle);
@@ -794,6 +828,165 @@ function makeRow(node) {
 }
 
 /** Data mode: turn the numbers in series into editable inputs */
+/** Draw order decides which shape catches a hover, so the panel can reorder the series itself */
+function moveSeries(from, to) {
+  const series = state.option && state.option.series;
+  if (!Array.isArray(series) || to < 0 || to >= series.length || from === to) return;
+
+  pushHistory();
+
+  const [moved] = series.splice(from, 1);
+  series.splice(to, 0, moved);
+
+  refreshChart();
+  scheduleSync();
+  buildPanel();
+}
+
+function seriesOrderButtons(index, total) {
+  const wrap = document.createElement('span');
+  wrap.className = 'series-order';
+
+  const make = (label, delta, title) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn tiny';
+    button.textContent = label;
+    button.title = title;
+    button.disabled = delta < 0 ? index <= 0 : index >= total - 1;
+    button.addEventListener('click', () => moveSeries(index, index + delta));
+    return button;
+  };
+
+  wrap.append(
+    make('▲', -1, 'Move earlier: drawn first, so it sits underneath the later series'),
+    make('▼', 1, 'Move later: drawn on top, which makes its filled area catch the hover')
+  );
+
+  return wrap;
+}
+
+/**
+ * Title / subtitle editor for charts that have no scatter nodes. Radar and pie charts carry
+ * their wording here, and there was no way to change it without editing the fence by hand.
+ */
+function buildTitleEditor(box) {
+  const option = state.option || {};
+  const raw = Array.isArray(option.title) ? option.title[0] : option.title;
+  const title = raw && typeof raw === 'object' ? raw : {};
+
+  const block = document.createElement('div');
+  block.className = 'data-block';
+
+  const head = document.createElement('div');
+  head.className = 'data-head';
+  head.textContent = 'title';
+  block.appendChild(head);
+
+  const commit = () => {
+    refreshChart();
+    scheduleSync();
+  };
+
+  const field = (caption, key, placeholder) => {
+    const row = document.createElement('label');
+    row.className = 'data-row';
+
+    const label = document.createElement('span');
+    label.className = 'data-label';
+    label.textContent = caption;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'data-text';
+    input.placeholder = placeholder;
+    input.value = typeof title[key] === 'string' ? title[key] : '';
+    input.addEventListener('change', () => {
+      const next = input.value.trim();
+
+      // title may be an array in the source; edit the first entry
+      if (Array.isArray(option.title)) option.title = option.title[0] || {};
+      if (!option.title || typeof option.title !== 'object') option.title = {};
+
+      if (next) option.title[key] = next;
+      else delete option.title[key];
+
+      // an empty title object draws nothing but still clutters the fence
+      if (!Object.keys(option.title).length) delete option.title;
+
+      commit();
+    });
+
+    row.append(label, input);
+    block.appendChild(row);
+  };
+
+  field('text', 'text', 'Chart title');
+  field('subtext', 'subtext', 'Subtitle');
+
+  box.appendChild(block);
+}
+
+/** Radar geometry: how big the polygon is and where it sits in the canvas */
+function buildRadarLayoutEditor(box) {
+  const radar = state.option && state.option.radar;
+  if (!radar || typeof radar !== 'object' || Array.isArray(radar)) return;
+
+  const block = document.createElement('div');
+  block.className = 'data-block';
+
+  const head = document.createElement('div');
+  head.className = 'data-head';
+  head.textContent = 'radar';
+  block.appendChild(head);
+
+  const commit = () => {
+    refreshChart();
+    scheduleSync();
+  };
+
+  const centre = Array.isArray(radar.center) ? radar.center : ['50%', '50%'];
+
+  const field = (caption, value, apply, placeholder) => {
+    const row = document.createElement('label');
+    row.className = 'data-row';
+
+    const label = document.createElement('span');
+    label.className = 'data-label';
+    label.textContent = caption;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'data-text';
+    input.placeholder = placeholder;
+    input.value = value == null ? '' : String(value);
+    input.addEventListener('change', () => {
+      apply(input.value.trim());
+      commit();
+    });
+
+    row.append(label, input);
+    block.appendChild(row);
+  };
+
+  field('radius', radar.radius, (next) => {
+    if (next) radar.radius = next;
+    else delete radar.radius;
+  }, '62%');
+
+  field('center x', centre[0], (next) => {
+    const now = Array.isArray(radar.center) ? radar.center[1] : centre[1];
+    radar.center = [next || '50%', now || '50%'];
+  }, '50%');
+
+  field('center y', centre[1], (next) => {
+    const now = Array.isArray(radar.center) ? radar.center[0] : centre[0];
+    radar.center = [now || '50%', next || '50%'];
+  }, '50%');
+
+  box.appendChild(block);
+}
+
 function buildDataEditor(box) {
   const series = Array.isArray(state.option.series) ? state.option.series : [];
   const indicators =
@@ -826,8 +1019,12 @@ function buildDataEditor(box) {
     block.className = 'data-block';
 
     const head = document.createElement('div');
-    head.className = 'data-head';
-    head.textContent = `series[${si}] · ${entry.type || 'series'}`;
+    head.className = 'data-head data-head-row';
+
+    const headText = document.createElement('span');
+    headText.textContent = `series[${si}] · ${entry.type || 'series'}`;
+
+    head.append(headText, seriesOrderButtons(si, series.length));
     block.appendChild(head);
 
     entry.data.forEach((row, ri) => {
@@ -952,7 +1149,9 @@ function buildSankeyEditor(entry, label) {
   keepText.textContent = 'Keep order';
   keep.append(keepBox, keepText);
 
-  head.append(title, keep);
+  const seriesList = (state.option && state.option.series) || [];
+
+  head.append(title, seriesOrderButtons(seriesList.indexOf(entry), seriesList.length), keep);
   block.appendChild(head);
 
   // ---- nodes ----
@@ -1433,8 +1632,13 @@ function buildTreeEditor(entry, label) {
   block.className = 'data-block';
 
   const head = document.createElement('div');
-  head.className = 'data-head';
-  head.textContent = `${label} · tree · ${flat.length} nodes`;
+  head.className = 'data-head data-head-row';
+
+  const headText = document.createElement('span');
+  headText.textContent = `${label} · tree · ${flat.length} nodes`;
+
+  const seriesList = (state.option && state.option.series) || [];
+  head.append(headText, seriesOrderButtons(seriesList.indexOf(entry), seriesList.length));
   block.appendChild(head);
 
   // --- size and layout ------------------------------------------------------
@@ -1514,11 +1718,17 @@ function buildPanel() {
   if (!state.nodeEditable) {
     const notice = document.createElement('p');
     notice.className = 'notice';
-    notice.textContent = treeEntry()
-      ? 'Tree chart: edit the hierarchy, the node scale and the layout box below.'
-      : 'This chart has no scatter nodes, so edit its data directly below.';
+    notice.textContent = state.tabFence
+      ? 'Tab group: each "## section" is one chart and they are rendered at build time. Only the first tab is previewed here — edit the sections in the article.'
+      : state.tableFence
+        ? 'Table fence: the chart is generated from the markdown table. Saving writes your edits back into that table.'
+        : treeEntry()
+        ? 'Tree chart: edit the hierarchy, the node scale and the layout box below.'
+        : 'This chart has no scatter nodes, so edit its data directly below.';
     box.appendChild(notice);
 
+    buildRadarLayoutEditor(box);
+    buildTitleEditor(box);
     buildDataEditor(box);
 
     const tree = treeEntry();
@@ -1784,6 +1994,11 @@ async function save() {
     return;
   }
 
+  if (state.tabFence) {
+    setStatus('Tab group — edit the sections in the article', 'warn');
+    return;
+  }
+
   setStatus('Syncing…', 'busy');
 
   try {
@@ -1906,6 +2121,8 @@ function applyData(data) {
     fences: data.fences || [],
     fenceIndex: data.fenceIndex || 0,
     nodeEditable: data.nodeEditable !== false,
+    tableFence: data.tableFence === true,
+    tabFence: data.tabFence === true,
     strictJson: data.strictJson !== false,
     nodes: data.nodes,
     option: data.option,
@@ -1942,23 +2159,109 @@ function applyData(data) {
   updateHistoryButtons();
 }
 
+/** Templates are the chart shapes this project already uses, served by /api/templates */
+let templateCache = null;
+
+async function loadTemplates() {
+  if (templateCache) return templateCache;
+
+  const data = await (await fetch('/api/templates')).json();
+  templateCache = data.templates || [];
+  return templateCache;
+}
+
+function pickerOption(value, text) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = text;
+  return option;
+}
+
 /** A markdown file may hold several ```echarts fences, so let the user pick one */
-function buildFencePicker() {
+async function buildFencePicker() {
   const picker = $('#fencePicker');
   const fences = state.fences || [];
-
-  picker.hidden = fences.length === 0;
-  if (!fences.length) return;
+  const canInsert = state.kind === 'md';
 
   picker.innerHTML = '';
+
+  if (!fences.length && canInsert) {
+    picker.appendChild(pickerOption('', 'No chart in this article yet'));
+  }
+
   fences.forEach((fence) => {
-    const option = document.createElement('option');
-    option.value = String(fence.index);
-    option.textContent = `Fence ${fence.index + 1} · line ${fence.line}${fence.heading ? ' · ' + fence.heading : ''}`;
-    picker.appendChild(option);
+    picker.appendChild(
+      pickerOption(
+        String(fence.index),
+        `Fence ${fence.index + 1} · line ${fence.line}${fence.heading ? ' · ' + fence.heading : ''}`
+      )
+    );
   });
 
-  picker.value = String(state.fenceIndex);
+  if (canInsert) {
+    if (fences.length) picker.appendChild(pickerOption('sep', '──────────────────'));
+
+    const templates = await loadTemplates().catch(() => []);
+    templates.forEach((template, index) => {
+      picker.appendChild(pickerOption(`new:${index}`, `＋ New · ${template.label}`));
+    });
+
+    if (fences.length) {
+      picker.appendChild(pickerOption('dup', '⧉ Duplicate this chart'));
+    }
+  }
+
+  // the separator is a visual break only
+  [...picker.options].filter((option) => option.value === 'sep').forEach((option) => {
+    option.disabled = true;
+  });
+
+  picker.hidden = picker.options.length === 0;
+  if (picker.hidden) return;
+
+  picker.value = fences.length ? String(state.fenceIndex) : '';
+}
+
+/** Write a new fence directly below the one being edited, then switch to it */
+async function insertFenceAfter(option, nodes, label) {
+  if (state.kind !== 'md' || !state.file) throw new Error('open a markdown article first');
+
+  setStatus('Adding chart…', 'busy');
+
+  const data = await postJson('/api/insert', {
+    path: state.file,
+    mode: 'after',
+    fence: state.fenceIndex,
+    option,
+    nodes
+  });
+
+  chartCache = null; // fence counts changed
+  applyData(data.state);
+  setStatus(`Added ${label} · fence ${data.index + 1}`, 'ok');
+}
+
+async function createFromTemplate(index) {
+  try {
+    const template = (await loadTemplates())[index];
+    if (!template) throw new Error('template not found');
+
+    await insertFenceAfter(JSON.parse(JSON.stringify(template.option)), null, template.shape);
+  } catch (err) {
+    setStatus('Add failed: ' + err.message, 'err');
+    await buildFencePicker();
+  }
+}
+
+async function duplicateCurrentChart() {
+  try {
+    // node charts keep their positions in the node list, not in the option
+    const nodes = state.nodeEditable ? state.nodes : null;
+    await insertFenceAfter(JSON.parse(JSON.stringify(state.option)), nodes, 'copy');
+  } catch (err) {
+    setStatus('Add failed: ' + err.message, 'err');
+    await buildFencePicker();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2030,6 +2333,9 @@ function bindStatic() {
     applyStage();
   });
 
+  // the checkbox has to show what the engine actually does, otherwise "unchecked" still syncs
+  $('#autoSync').checked = state.autoSync;
+
   $('#autoSync').addEventListener('change', (e) => {
     state.autoSync = e.target.checked;
 
@@ -2073,7 +2379,21 @@ function bindStatic() {
   bindFileModal();
 
   $('#fencePicker').addEventListener('change', async (e) => {
-    const target = Number(e.target.value);
+    const value = e.target.value;
+
+    if (value === 'sep') return;
+
+    if (value.startsWith('new:')) {
+      await createFromTemplate(Number(value.slice(4)));
+      return;
+    }
+
+    if (value === 'dup') {
+      await duplicateCurrentChart();
+      return;
+    }
+
+    const target = Number(value);
     setStatus('Switching fence…', 'busy');
 
     try {

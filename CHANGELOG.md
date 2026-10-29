@@ -8,6 +8,63 @@
 尚未发布的改动放在最上面，**按日期分组**：每个日期下再分 Added / Changed / Fixed，新的一天加在最上面。
 已发布的版本仍以版本号为节，节标题里带发布日期。日期取改动落地那天，不是写记录的日期。
 
+## 2026-10-28
+
+### Added
+
+- 新增 `tools/serve.js` 作为 `npm run server`：**按需重建**的开发服务器 —— 文件变动只打一个
+  「脏」标记（hexo box 的 chokidar 监听，单文件几十毫秒），刷新页面时才跑 `_generate()`。
+  实测：改动后刷新 1.5 秒出新页面，没改动时连刷不重建。之所以这么做：hexo 的
+  `source.process()` 是全量扫描，这个站 1400+ 篇要 37 秒，而 `_generate({cache:true})` 只要 1.5 秒。
+  原命令保留为 `npm run server:hexo`
+- 移除 `hexo-browsersync`：它盯 `route.on('update')` 自动刷浏览器，正是"改点东西页面就跳"的来源
+- **跨文章引用**（`scripts/filters/include_block.js`）：源文章里用
+  `<!-- #region 名字 -->` … `<!-- #endregion 名字 -->` 圈一段（也认 `begin` / `end`），
+  别的文章写 `{% include_block 路径#名字 %}` 或短别名 `{% inc 路径 名字 %}` 就能整段引进来
+  （路径相对 `source/_posts`，扩展名可省），
+  不用重复写。做成 priority 5 的 `before_post_render` filter 而不是 tag，是因为 tag 在 markdown
+  渲染之后才展开——那样被引用内容里的 ```echarts 围栏就赶不上围栏过滤器；现在引入的是原始
+  markdown，标题、表格、图表都照常处理。锚点注释不会输出到页面；找不到文件或锚点时打 WARN
+  并在正文留一条提示。支持 A→B→C 链式引用（最多 3 层）
+- ```echarts 围栏支持 **tab 分组**：一个围栏里用 `## 标签` 分节，每节一张图（JSON 或表格都行），
+  节前的 `tabs: left|right` 决定 tab 位置、`height` 统一下高度。构建期生成左侧 tab + 多面板，
+  切换时才初始化对应图表（隐藏面板初始化会拿到 0 尺寸）；深浅主题切换保留当前 tab。
+  样式在新文件 `source/css/_page/echarts.styl`，分节解析放进 `echarts-table.js` 与编辑器共用，
+  编辑器遇到 tab 围栏只预览第一节、拒绝回写
+- ```echarts 围栏可以直接写 **Markdown 表格**，构建期把表格转成 option，数据只维护一份：
+  表格前的 `type: radar|bar|line|pie`（默认 bar）、`height`、`colors` 是指令；表头取
+  "第一行全数字之前最后一个非全数字行"，所以 `| 伙伴型同事 | （P型） |` +
+  `| 维度 | 对手R | 敌人E | 伙伴P |` 这种两行表头也认；每行一个系列，行名即系列名。
+  解析器独立成 `scripts/filters/echarts-table.js`，编辑器复用同一份做预览（只读，
+  拒绝回写以保住表格），两边不会跑偏
+
+- 编辑器围栏下拉框可直接新建图表：`＋ New · 形状 · 出处` 取自项目里已有的每种图表形状
+  （当前是 funnel / line+scatter / pie / radar / sankey / tree），选中即在该围栏下方插入一份
+  可直接改的副本并切换过去；另加 `⧉ Duplicate this chart` 复制当前图表
+- 数据模式面板新增 **title / subtext 编辑**，雷达图、饼图这类没有散点节点的图表终于能改标题
+- 每个 series 表头新增 **▲ / ▼** 调整 `series` 数组顺序：后画的在上层，也就决定了 hover 时
+  命中哪个系列（雷达图里小的多边形被大的整片盖住时，只能靠它把小的挪到最上层）；
+  面板里的行拖拽只改同一系列的数据点顺序，改不了系列顺序，这点现在有明确入口了。
+  撤销/重做的快照同步扩展到数据模式的整段 `series`
+
+### Fixed
+
+- 表格围栏在编辑器里改完无法保存（上一版把它设成了只读，打开文章默认停在第一张表格图上，
+  看起来像"整个编辑器的回写坏了"）：新增 `optionToTableFence()` 把 option 反向写成表格，
+  改动只重建表头与数据行，`type` / `title` / `colors` 等指令行和说明行原样保留，
+  真正改过的 `radius` / `center` 才补写。往返幂等，不会把表格换成 JSON
+- 「Auto-sync」复选框和实际行为不一致：`index.html` 里的 input 没有 `checked`，页面加载时
+  显示**未勾选**，而 `state.autoSync` 默认 `true` —— 于是"明明没勾选"也照样写文件。
+  现在页面里默认带 `checked`，并且在 `bindStatic` 里把勾选态强制对齐到 `state.autoSync`
+- 表格围栏的**副标题**存不住：回写只生成 `title:`，`option.title.subtext` 被丢掉。
+  新增 `subtitle` 指令（读、写都支持），JSON 围栏本来就没问题
+- 雷达图 tooltip 只显示被点中的那个系列（上层多边形盖住下层，永远只看得到「极限」）：
+  JSON 围栏写不了函数，改为约定字符串占位 `"formatter": "<radar>"`，
+  由 `echarts-fence.js` 的 BOOT 换成函数，一次列出同一圈上所有系列的数值；
+  编辑器的「按博客渲染」同步了这段逻辑
+- 《在职场中，该如何处理与同事之间的关系》里的雷达围栏多了一个逗号，`JSON.parse` 失败，
+  博客端一直按原样保留、没有渲染；补齐逗号并改用上面的 tooltip 占位
+
 ## 2026-10-24
 
 ### Added

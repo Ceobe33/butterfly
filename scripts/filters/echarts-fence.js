@@ -11,14 +11,32 @@
  *   }
  *   ```
  *
+ * 围栏体也可以直接写 Markdown 表格（数据只有一份），表格前面的 `key: value` 是指令：
+ *
+ *   ```echarts
+ *   type: radar
+ *   height: 460
+ *   | 维度 | 对手R | 敌人E | 伙伴P |
+ *   | --- | --- | --- | --- |
+ *   | 极限 | 5 | 5 | 5 |
+ *   | 强度 | 1 | 2 | 4 |
+ *   ```
+ *
+ * 支持 type: radar / bar / line / pie（默认 bar），转换规则见 scripts/filters/echarts-table.js。
+ *
  * 说明：
  * - 必须在 before_post_render 阶段插入裸 HTML（tag.render 在 markdown 之后才跑）；
  *   JSON 压缩成一行，marked 遇到空行才结束 HTML 块，所以整段会被当作一个完整 HTML 块透传。
  * - 图表用的 ECharts 由页面按需从 CDN 加载，不用的文章不会多加载任何 JS。
  * - height 是约定字段，默认 420，传给 ECharts 前会被剔除。
+ * - tooltip.formatter 可以写成字符串占位 "<radar>"：JSON 写不了函数，而雷达图默认只显示
+ *   被点中的那个系列（上层多边形盖住下层）。这个占位会在运行期换成函数，一次列出同一圈
+ *   上所有系列的数值。
  */
 
 'use strict'
+
+const { isTableFence, tableFenceOption, tabFence } = require('./echarts-table')
 
 const CDN = hexo.config.echarts_cdn ||
   'https://cdn.jsdelivr.net/npm/echarts@6/dist/echarts.min.js'
@@ -31,6 +49,29 @@ const escapeAttr = str => String(str)
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;')
+
+const escapeText = str => String(str)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+
+function tabsHtml(start, tabs) {
+  const buttons = tabs.options
+    .map((entry, i) => `<button type="button"${i === 0 ? ' class="is-active"' : ''} data-tab="${i}">${escapeText(entry.label)}</button>`)
+    .join('')
+
+  const panels = tabs.options
+    .map((entry) => {
+      const option = JSON.parse(JSON.stringify(entry.option))
+      const height = tabs.height || Number(option.height) || 420
+      delete option.height
+
+      return `<div class="echarts-wrap" data-options="${escapeAttr(JSON.stringify(option))}" style="height:${height}px"></div>`
+    })
+    .join('')
+
+  return `${start}<div class="echarts-tabs" data-side="${tabs.side}" data-active="0"><div class="echarts-tabs-nav">${buttons}</div><div class="echarts-tabs-panels">${panels}</div></div>\n\n`
+}
 
 const BOOT = `(function () {
   if (window.__echartsBooted) return
@@ -60,6 +101,35 @@ const BOOT = `(function () {
     })
   }
 
+  // 雷达图默认 tooltip 只显示被点中的那个系列——上层多边形把下层盖住，因此永远只看得到
+  // "极限"这一层，看不到分数。JSON 里写不了函数，所以约定字符串占位 "formatter": "<radar>"，
+  // 在这里换成真正的函数，一次列出同一圈上所有系列的数值。
+  var radarTooltip = function (option) {
+    var labels = ((option.radar && option.radar.indicator) || []).map(function (item) {
+      return (item && item.name) || ''
+    })
+    var series = (option.series || []).filter(function (s) { return s && s.type === 'radar' })
+
+    var names = series.map(function (s) { return s.name })
+
+    return function (params) {
+      var index = params.dataIndex == null ? 0 : params.dataIndex
+      var head = (params.data && params.data.name) || params.seriesName || ''
+
+      var rows = labels.map(function (label, i) {
+        var cells = series.map(function (s) {
+          var datum = (s.data || [])[index] || {}
+          var value = Array.isArray(datum.value) ? datum.value[i] : datum.value
+          return (s.name ? s.name + ' ' : '') + (value == null ? '-' : value)
+        })
+        return label + '：' + cells.join(' ｜ ')
+      })
+
+      // the item name is usually just the series name again, so only show it when it adds something
+      return (names.indexOf(head) < 0 ? [head] : []).concat(rows).join('<br/>')
+    }
+  }
+
   // 按浅色/深色调整文字与网格颜色，背景保持透明以贴合主题
   var tune = function (option, dark) {
     var option2 = JSON.parse(JSON.stringify(option))
@@ -71,6 +141,10 @@ const BOOT = `(function () {
 
     option2.backgroundColor = 'transparent'
     option2.textStyle = Object.assign({ color: text }, option2.textStyle)
+
+    if (option2.tooltip && option2.tooltip.formatter === '<radar>') {
+      option2.tooltip.formatter = radarTooltip(option2)
+    }
 
     if (option2.legend) {
       option2.legend.textStyle = Object.assign({ color: text }, option2.legend.textStyle)
@@ -93,21 +167,67 @@ const BOOT = `(function () {
     return option2
   }
 
+  // 挂一张图（同一个容器只挂一次）
+  var mount = function (echarts, el) {
+    if (!el) return null
+    if (el.__echarts) return el.__echarts
+
+    var option
+    try {
+      option = JSON.parse(el.dataset.options)
+    } catch (e) {
+      console.error('[echarts] option 解析失败', e)
+      return null
+    }
+
+    var chart = echarts.init(el)
+    chart.setOption(tune(option, isDark()))
+    el.__echarts = chart
+    charts.push(chart)
+    return chart
+  }
+
+  // 左侧 tab 切换的多图：隐藏的面板不初始化，避免拿到 0 宽高
+  var wireTabs = function (echarts, group) {
+    var nav = group.querySelector('.echarts-tabs-nav')
+    var buttons = nav ? [].slice.call(nav.querySelectorAll('button')) : []
+    var panels = [].slice.call(group.querySelectorAll('.echarts-tabs-panels > .echarts-wrap'))
+    if (!buttons.length || !panels.length) return
+
+    var show = function (index) {
+      buttons.forEach(function (button, i) { button.classList.toggle('is-active', i === index) })
+      panels.forEach(function (panel, i) { panel.style.display = i === index ? 'block' : 'none' })
+
+      group.dataset.active = String(index)
+
+      var chart = mount(echarts, panels[index])
+      if (chart) chart.resize()
+    }
+
+    if (!group.__wired) {
+      group.__wired = true
+      buttons.forEach(function (button, i) {
+        button.addEventListener('click', function () { show(i) })
+      })
+    }
+
+    var active = Math.min(Number(group.dataset.active) || 0, panels.length - 1)
+    show(active)
+  }
+
   var render = function (echarts) {
     charts.forEach(function (c) { c.dispose() })
     charts = []
 
-    targets().forEach(function (el) {
-      var option
-      try {
-        option = JSON.parse(el.dataset.options)
-      } catch (e) {
-        console.error('[echarts] option 解析失败', e)
-        return
-      }
-      var chart = echarts.init(el)
-      chart.setOption(tune(option, isDark()))
-      charts.push(chart)
+    var wraps = targets()
+    wraps.forEach(function (el) { delete el.__echarts })
+
+    var groups = [].slice.call(document.querySelectorAll('#article-container .echarts-tabs'))
+    groups.forEach(function (group) { wireTabs(echarts, group) })
+
+    wraps.forEach(function (el) {
+      if (el.closest('.echarts-tabs')) return // 由 wireTabs 按需挂载
+      mount(echarts, el)
     })
   }
 
@@ -140,12 +260,25 @@ hexo.extend.filter.register('before_post_render', data => {
 
   data.content = data.content.replace(fenceReg,
     (raw, start, quote, lang, content) => {
+      // 多个 "## 小节" = 一组 tab 图，交给专门的渲染
+      const tabs = tabFence(content)
+      if (tabs) {
+        hit = true
+        return tabsHtml(start, tabs)
+      }
+
       let option
+
       try {
         option = JSON.parse(content.trim())
       } catch (err) {
-        hexo.log.warn(`[echarts] ${source} 中的 echarts 围栏不是合法 JSON，已原样保留：${err.message}`)
-        return raw
+        // 不是 JSON 的时候还可以是 Markdown 表格，表格即数据，图表在构建期生成
+        option = isTableFence(content) ? tableFenceOption(content) : null
+
+        if (!option) {
+          hexo.log.warn(`[echarts] ${source} 中的 echarts 围栏既不是合法 JSON 也不是可用的表格，已原样保留：${err.message}`)
+          return raw
+        }
       }
 
       hit = true

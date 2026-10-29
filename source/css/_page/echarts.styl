@@ -1,0 +1,58 @@
+// ECharts 图表：普通单图容器，以及左侧 tab 切换的多图
+// 单图的尺寸由围栏里的 height 决定，写在行内样式上
+
+.echarts-tabs
+  display flex
+  gap 12px
+  align-items flex-start
+  margin 1rem 0
+
+  +maxWidth768()
+    flex-direction column
+    gap 8px
+
+  &-nav
+    display flex
+    flex-direction column
+    gap 4px
+    flex 0 0 auto
+    min-width 156px
+    max-width 210px
+
+    +maxWidth768()
+      flex-direction row
+      flex-wrap wrap
+      max-width none
+
+    button
+      padding 6px 10px
+      border 1px solid transparent
+      border-radius 6px
+      background var(--tab-botton-bg)
+      color var(--tab-botton-color)
+      font-size 13px
+      line-height 1.45
+      text-align left
+      white-space normal
+      cursor pointer
+      transition background 0.15s ease, color 0.15s ease
+
+      &:hover
+        background var(--tab-button-hover-bg)
+
+      // 当前项用主题强调色，深浅模式下都看得清
+      &.is-active
+        background $theme-color
+        border-color $theme-color
+        color #fff
+
+  &-panels
+    flex 1
+    min-width 0
+
+    // 默认只显示第一张，切换由脚本接管，避免脚本加载前 8 张图一起闪出来
+    .echarts-wrap
+      display none
+
+      &:first-child
+        display block

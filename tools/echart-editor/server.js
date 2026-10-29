@@ -25,6 +25,7 @@ const http = require('http');
 const path = require('path');
 const vm = require('vm');
 const { execFile } = require('child_process');
+const { isTableFence, tableFenceOption, optionToTableFence, tabFence } = require('../../scripts/filters/echarts-table');
 
 // themes/butterfly/tools/echart-editor -> repo root (four levels up)
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
@@ -53,6 +54,12 @@ const MIME = {
 };
 
 const EMPTY_NODE_COLOR = '#4bacc6';
+
+const TABLE_FENCE_ERROR =
+  'this fence holds a markdown table — the chart is generated from that table at build time, so edit the table itself';
+
+const TAB_FENCE_ERROR =
+  'this fence holds a tab group — each "## section" is one chart, and they are rendered at build time, so edit the sections in the article';
 
 /** initial option for a blank canvas (no hard-coded text colour; the blog's tune() decides) */
 const DEFAULT_OPTION = {
@@ -566,14 +573,28 @@ function loadChart(fenceIndex = 0) {
     const index = Math.min(Math.max(0, Number(fenceIndex) || 0), fences.length - 1);
     const fence = fences[index];
 
-    const option = parseOptionLiteral(fence.body, `chart ${index + 1}`);
+    // tab groups and table fences are generated at build time: preview only, never write back
+    const tabs = tabFence(fence.body);
+    const table = !tabs && isTableFence(fence.body);
+    let option;
+
+    if (tabs) {
+      option = tabs.options[0].option; // show the first tab as a preview
+    } else if (table) {
+      option = tableFenceOption(fence.body);
+      if (!option) throw new Error(`chart ${index + 1} is a table fence, but the table could not be read`);
+    } else {
+      option = parseOptionLiteral(fence.body, `chart ${index + 1}`);
+    }
 
     return {
       kind,
       code,
       option,
       nodes: nodesFromOption(option),
-      nodeEditable: seriesIndexOf(option, 'scatter') >= 0,
+      nodeEditable: !tabs && seriesIndexOf(option, 'scatter') >= 0,
+      tableFence: table,
+      tabFence: Boolean(tabs),
       fenceIndex: index,
       fences: fences.map((f) => ({ index: f.index, line: f.openLine + 1, heading: f.heading }))
     };
@@ -619,6 +640,9 @@ function writeNodes(incoming, fenceIndex = 0) {
 
   // markdown: replace only the fence body, nothing outside it
   if (chart.kind === 'md') {
+    if (chart.tableFence) throw new Error(TABLE_FENCE_ERROR);
+    if (chart.tabFence) throw new Error(TAB_FENCE_ERROR);
+
     const fence = findFences(chart.code)[chart.fenceIndex];
     if (!fence) throw new Error('this file has no chart yet — use "Insert current chart" to add one');
 
@@ -661,13 +685,21 @@ function writeOption(incoming, fenceIndex = 0) {
   }
 
   if (chart.kind === 'md') {
+    if (chart.tabFence) throw new Error(TAB_FENCE_ERROR);
+
     const fence = findFences(chart.code)[chart.fenceIndex];
     if (!fence) throw new Error('this file has no chart yet — use "Insert current chart" first');
 
-    // the fence may hold a JS object literal; serialising it as JSON would drop any function
-    assertPlain(chart.option, `chart ${chart.fenceIndex + 1}`);
+    let text;
 
-    const text = serializeJson(incoming);
+    if (chart.tableFence) {
+      // write back as a table, so editing in the browser never turns the fence into JSON
+      text = optionToTableFence(incoming, fence.body);
+    } else {
+      // the fence may hold a JS object literal; serialising it as JSON would drop any function
+      assertPlain(chart.option, `chart ${chart.fenceIndex + 1}`);
+      text = serializeJson(incoming);
+    }
     const body = text
       .split('\n')
       .map((line) => fence.indent + line)
@@ -805,6 +837,65 @@ async function buildChartList() {
   return out;
 }
 
+let templateCache = null;
+
+/**
+ * One example of every chart shape this project already uses, so "new chart" starts from
+ * something that renders the way the articles do instead of an empty grid.
+ * Shapes are keyed by the series types, e.g. "pie" or "line+scatter".
+ */
+async function buildTemplates() {
+  const out = [];
+  const seen = new Set();
+  const files = (await buildChartList()).filter((item) => /\.md$/i.test(item.path));
+
+  for (const item of files) {
+    let text;
+    try {
+      text = await fs.promises.readFile(path.join(ROOT, item.path), 'utf8');
+    } catch (err) {
+      continue;
+    }
+
+    for (const fence of findFences(text)) {
+      let option;
+      try {
+        option = parseOptionLiteral(fence.body, item.path);
+      } catch (err) {
+        continue; // a broken fence is the article's problem, not the template list's
+      }
+      if (!option || !Array.isArray(option.series) || !option.series.length) continue;
+
+      const shape = [...new Set(option.series.map((entry) => (entry && entry.type) || '?'))].sort().join('+');
+      if (seen.has(shape)) continue;
+      seen.add(shape);
+
+      // headings come straight from markdown, so strip the emphasis before using one as a label
+      const heading = String(fence.heading || path.basename(item.path, '.md'))
+        .replace(/[*_`#>]/g, '')
+        .trim();
+
+      out.push({
+        shape,
+        label: `${shape} · ${heading}`,
+        source: item.path,
+        option
+      });
+    }
+
+    if (out.length >= 16) break;
+  }
+
+  out.sort((a, b) => a.shape.localeCompare(b.shape));
+  templateCache = out;
+  return out;
+}
+
+function listTemplates() {
+  if (templateCache) return Promise.resolve(templateCache);
+  return buildTemplates();
+}
+
 /** Every file (no fence counting, so it is quick) */
 function plainFileList() {
   const out = [];
@@ -886,7 +977,9 @@ function insertFence(payload) {
       ? JSON.parse(JSON.stringify(payload.option))
       : JSON.parse(JSON.stringify(DEFAULT_OPTION));
 
-  const option = applyNodesToOption(source, payload.nodes || []);
+  // nodes are optional: a template or a duplicate brings its own data
+  const nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  const option = nodes.length ? applyNodesToOption(source, nodes) : source;
   const json = serializeJson(option).split('\n');
 
   let at;
@@ -897,6 +990,12 @@ function insertFence(payload) {
     block = ['```echarts', ...json, '```', ''];
   } else if (payload.mode === 'end') {
     at = lines.length;
+    block = ['', '```echarts', ...json, '```', ''];
+  } else if (payload.mode === 'after') {
+    // drop the new fence straight below an existing one, keeping the article order readable
+    const fences = findFences(lines.join('\n'));
+    const index = Math.min(Math.max(0, Number(payload.fence) || 0), fences.length - 1);
+    at = fences[index] ? fences[index].closeLine + 1 : lines.length;
     block = ['', '```echarts', ...json, '```', ''];
   } else {
     at = Math.min(Math.max(0, Number(payload.line) || 0), lines.length);
@@ -988,8 +1087,10 @@ function buildState(fenceIndex = 0) {
       label: String(n[4])
     })),
     nodeEditable: chart.nodeEditable !== false,
+    tableFence: Boolean(chart.tableFence),
+    tabFence: Boolean(chart.tabFence),
     // the blog's fence filter only accepts strict JSON; anything else is left as raw markdown
-    strictJson: chart.kind === 'md' ? isStrictJson(chart) : true,
+    strictJson: chart.kind === 'md' ? chart.tableFence || isStrictJson(chart) : true,
     option: JSON.parse(JSON.stringify(option)),
     palette: paletteOf(chart),
     axis: {
@@ -1126,6 +1227,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/anchors' && req.method === 'GET') {
       const target = resolveInRoot(url.searchParams.get('path') || '');
       return sendJson(res, 200, { anchors: anchorsFor(target) });
+    }
+
+    if (url.pathname === '/api/templates' && req.method === 'GET') {
+      return sendJson(res, 200, { templates: await listTemplates() });
     }
 
     if (url.pathname === '/api/open' && req.method === 'POST') {

@@ -52,7 +52,28 @@ then becomes the current target, and further edits sync automatically.
 | Markdown       | `.md` extension              | Only the body of the selected ```echarts fence is replaced                   |
 
 When one markdown file holds several charts, the dropdown in the top bar lists every fence by
-“number · line · nearest heading”, and switching loads that chart.
+“number · line · nearest heading”, and switching loads that chart. The same dropdown also creates
+charts:
+
+- **＋ New · shape · source** — one entry per chart shape that already exists in this project
+  (`/api/templates` takes the first fence of each distinct set of series types, so a pie chart
+  starts from a real pie chart). Picking one writes it just below the fence you are editing and
+  switches to it.
+- **⧉ Duplicate this chart** — copies the current option, or the current nodes and all, so the new
+  fence keeps the positions you dragged.
+
+Charts without a scatter series open in data mode, where the panel starts with a **title /
+subtitle** block: radar and pie charts keep their wording in `option.title`, which used to be
+hand-edit only. Radar charts get a **radar** block above it for `radius`, `center x` and
+`center y`, so the polygon can be moved and resized without touching the JSON.
+
+Fences written as a markdown table are editable too: saving runs the option back through
+`optionToTableFence()`, which rebuilds the header and data rows and keeps the directive lines, so
+the fence stays a table instead of turning into JSON.
+
+Each series header carries **▲ / ▼** buttons that move that entry within `option.series`. Order is
+draw order, and draw order is hit order: a small radar polygon sitting inside a bigger one can only
+be hovered once it is drawn last. Dragging the rows inside a block reorders data points, not series.
 
 Fence bodies are read leniently: strict JSON first, then a JS object literal, so hand-written
 charts with unquoted keys, single quotes or `// comments` still open. That leniency is only on the
