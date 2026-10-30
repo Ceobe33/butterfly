@@ -106,8 +106,8 @@ closed back to its starting point.
 - **Reference grid and snap** — the grid draws one-unit lines; snapping rounds coordinates to 0.5
 - **Shortcuts** — `⌘S` saves, `⌘A` selects everything, `Esc` clears the selection
 
-Edits are debounced by 350ms and then written back, with the result shown in the status bar. Turn
-off “Auto-sync” to save by hand instead.
+“Auto-sync” is off by default: edits only change the preview until you press ⌘S / **Save**. Tick it to
+write the file 350ms after every change instead.
 
 ## Tree charts
 

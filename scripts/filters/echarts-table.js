@@ -6,7 +6,6 @@
  * 围栏体除了写 JSON，也可以直接写表格，这样数据只有一份：
  *
  *   ```echarts
- *   type: radar
  *   height: 420
  *   | 维度 | 对手R | 敌人E | 伙伴P |
  *   | --- | --- | --- | --- |
@@ -15,9 +14,11 @@
  *   ```
  *
  * 规则：
- * - 表格前的 `key: value` 行是指令：`type`（radar / bar / line / pie，默认 bar）、`height`、
+ * - 只写表格就是雷达图（表格是这个站的主要用法），要别的图形再加 `type: bar|line|pie`
+ * - 表格前的 `key: value` 行是指令：`type`（radar / bar / line / pie，默认 radar）、`height`、
  *   `title` / `subtitle`（标题与副标题）、`colors`（按系列顺序覆盖配色，如 `colors: #E60000, #A9C9E8`）、
- *   radar 的 `radius` 与 `center`（如 `center: 50%, 50%`）
+ *   radar 的 `radius`、`center`（如 `center: 50%, 50%`）与 `shape`（circle / polygon，默认 polygon）
+ * - radar 里行名为 `max` / `min` 的行是每根轴的量程，不当系列画；没写 max 就按该列最大值取
  * - 表头取"第一行全数字之前、最后一个非全数字行"，所以像
  *   `| 伙伴型同事 | （P型） |` + `| 维度 | 对手R | 敌人E | 伙伴P |` 这种两行表头也能认
  * - 表头第一列是行名，其余列是维度/分类；每个数据行 = 一个系列，行名即系列名
@@ -101,7 +102,9 @@ function buildOption (directives, rows) {
 
   const categories = header.slice(1).map((cell, i) => cell || `#${i + 1}`)
   const labels = body.map((row, i) => row[0] || `series ${i + 1}`)
-  const type = String(directives.type || 'bar').toLowerCase()
+  // 表格默认画成雷达图；type 写错（比如 rader）也退回雷达，不要静默变成柱状图
+  const wanted = String(directives.type || '').toLowerCase()
+  const type = ['radar', 'bar', 'line', 'pie'].indexOf(wanted) >= 0 ? wanted : 'radar'
   const height = Number(directives.height) || 420
 
   // "colors: #E60000, #A9C9E8" 按系列顺序覆盖默认配色
@@ -115,31 +118,55 @@ function buildOption (directives, rows) {
     : null
 
   if (type === 'radar') {
-    // 每个轴各自取该列最大值，避免不同量纲的指标被同一个上限压扁
-    const maxima = categories.map((_, column) =>
-      Math.max(1, ...body.map(row => valuesOf(row)[column] || 0))
+    // 行名是 max / min 的行给的是每根轴的量程，不画成系列
+    const bounds = { max: {}, min: {} }
+    const plots = []
+
+    body.forEach((row) => {
+      const key = String(row[0] || '').trim().toLowerCase()
+
+      if (key !== 'max' && key !== 'min') {
+        plots.push(row)
+        return
+      }
+
+      valuesOf(row).forEach((value, column) => {
+        if (value !== null) bounds[key][column] = value
+      })
+    })
+
+    const names = plots.map((row, i) => row[0] || `series ${i + 1}`)
+
+    // 没写 max 行时，每个轴各自取该列最大值，避免不同量纲的指标被同一个上限压扁
+    const maxima = categories.map((_, column) => {
+      if (bounds.max[column] != null) return bounds.max[column]
+      return Math.max(1, ...plots.map(row => valuesOf(row)[column] || 0))
+    })
+    // min 行不小于上限时按 0 处理，否则整根轴会缩成一个点
+    const minima = maxima.map((max, column) =>
+      bounds.min[column] != null && bounds.min[column] < max ? bounds.min[column] : 0
     )
 
     return {
       ...(title ? { title } : {}),
       height,
       tooltip: { trigger: 'item', formatter: '<radar>' },
-      legend: { bottom: 0, data: labels },
+      legend: { bottom: 0, data: names },
       radar: {
         radius: directives.radius || '62%',
         ...(directives.center ? { center: String(directives.center).split(',').map((v) => v.trim()).filter(Boolean) } : {}),
-        shape: 'polygon',
+        shape: String(directives.shape || '').toLowerCase() === 'circle' ? 'circle' : 'polygon',
         splitNumber: 5,
-        indicator: categories.map((name, column) => ({ name, max: maxima[column], min: 0 }))
+        indicator: categories.map((name, column) => ({ name, max: maxima[column], min: minima[column] }))
       },
-      series: labels.map((name, i) => ({
-        name,
+      series: plots.map((row, i) => ({
+        name: names[i],
         type: 'radar',
         symbol: 'none',
         lineStyle: { color: palette[i % palette.length], width: 2 },
         itemStyle: { color: palette[i % palette.length] },
         areaStyle: { color: palette[i % palette.length], opacity: 0.18 },
-        data: [{ value: valuesOf(body[i]), name }]
+        data: [{ value: valuesOf(row), name: names[i] }]
       }))
     }
   }
@@ -185,6 +212,13 @@ function tableFenceOption (text) {
   return buildOption(directives, readRows(rest))
 }
 
+/** 这份表格实际会用到的配色，编辑器新增系列时按同一份取色 */
+function tableFenceColors (text) {
+  const { directives } = readDirectives(String(text || '').split('\n'))
+  const custom = String(directives.colors || '').split(/[\s,]+/).filter(Boolean)
+  return custom.length ? custom : PALETTE.slice()
+}
+
 // ---------------------------------------------------------------------------
 // option -> 表格（编辑器回写用）
 // ---------------------------------------------------------------------------
@@ -217,7 +251,7 @@ function padTable (rows) {
  * 不认识的指令行原样留在最后，注释之类不会被吃掉。
  */
 function knownDirectives (option, prefix, series, baseline) {
-  const known = /^(type|title|subtitle|height|colors|radius|center)\s*:/i
+  const known = /^(type|title|subtitle|height|colors|radius|center|shape)\s*:/i
   const unknown = prefix.filter(line => line.trim() && !known.test(line.trim()))
 
   const original = {}
@@ -227,7 +261,7 @@ function knownDirectives (option, prefix, series, baseline) {
   })
 
   const radar = option.radar || {}
-  const inferred = series.some(entry => entry && entry.type === 'radar')
+  const inferred = (radar.indicator || series.some(entry => entry && entry.type === 'radar'))
     ? 'radar'
     : series.length === 1 && series[0] && series[0].type === 'pie'
       ? 'pie'
@@ -249,6 +283,7 @@ function knownDirectives (option, prefix, series, baseline) {
       (original.center || JSON.stringify(radar.center) !== JSON.stringify(baseRadar.center || null))) {
     out.push(`center: ${radar.center.join(', ')}`)
   }
+  if (radar.shape && (original.shape || radar.shape !== baseRadar.shape)) out.push(`shape: ${radar.shape}`)
   if (original.colors) out.push(`colors: ${original.colors}`)
 
   return [...out, ...unknown]
@@ -281,11 +316,18 @@ function optionToTableFence (option, originalBody) {
 
   if (indicators && series.every(entry => entry && entry.type === 'radar')) {
     header = [label, ...indicators.map(item => (item && item.name) || '')]
-    body = series.map(entry => {
+
+    // 原本写了 max / min 量程行的，回写时照原样补回去，别把量程吃成数据行
+    const hasRange = key => rows.some(row => String(row[0] || '').trim().toLowerCase() === key)
+    const ranges = []
+    if (hasRange('max')) ranges.push(['max', ...indicators.map(item => item.max)])
+    if (hasRange('min')) ranges.push(['min', ...indicators.map(item => item.min)])
+
+    body = [...ranges, ...series.map(entry => {
       const datum = (entry.data || [])[0] || {}
       const value = Array.isArray(datum.value) ? datum.value : []
       return [entry.name || '', ...value]
-    })
+    })]
   } else if (series.length === 1 && series[0] && series[0].type === 'pie') {
     header = [label, (headerRow && headerRow[1]) || '数值']
     body = (series[0].data || []).map(item => [item.name, item.value])
@@ -306,7 +348,7 @@ function optionToTableFence (option, originalBody) {
   return [...knownDirectives(option, prefix, series, baseline), ...table].join('\n')
 }
 
-module.exports = { isTableFence, tableFenceOption, optionToTableFence, tabFence }
+module.exports = { isTableFence, tableFenceOption, tableFenceColors, optionToTableFence, tabFence }
 
 /**
  * 一个围栏里放多张图，用 "## 标签" 分节，构建期生成左侧 tab + 多个面板。

@@ -22,7 +22,7 @@
  *   | 强度 | 1 | 2 | 4 |
  *   ```
  *
- * 支持 type: radar / bar / line / pie（默认 bar），转换规则见 scripts/filters/echarts-table.js。
+ * 支持 type: radar / bar / line / pie（默认 radar），转换规则见 scripts/filters/echarts-table.js。
  *
  * 说明：
  * - 必须在 before_post_render 阶段插入裸 HTML（tag.render 在 markdown 之后才跑）；

@@ -15,7 +15,7 @@ const state = {
   option: null,
   palette: {},
   axis: { xMin: 0, xMax: 1, yMin: 0, yMax: 1 },
-  autoSync: true,
+  autoSync: false,
   showGrid: false,
   snap: false,
   blogMode: true,
@@ -927,7 +927,7 @@ function buildTitleEditor(box) {
   box.appendChild(block);
 }
 
-/** Radar geometry: how big the polygon is and where it sits in the canvas */
+/** Radar geometry: how big the polygon is, whether it's a polygon or a circle, and where it sits */
 function buildRadarLayoutEditor(box) {
   const radar = state.option && state.option.radar;
   if (!radar || typeof radar !== 'object' || Array.isArray(radar)) return;
@@ -984,6 +984,32 @@ function buildRadarLayoutEditor(box) {
     radar.center = [now || '50%', next || '50%'];
   }, '50%');
 
+  const choose = (caption, value, options) => {
+    const row = document.createElement('label');
+    row.className = 'data-row';
+
+    const label = document.createElement('span');
+    label.className = 'data-label';
+    label.textContent = caption;
+
+    const select = document.createElement('select');
+    select.className = 'data-text';
+    options.forEach(([key, text]) => select.appendChild(pickerOption(key, text)));
+    select.value = value;
+    select.addEventListener('change', () => {
+      radar.shape = select.value;
+      commit();
+    });
+
+    row.append(label, select);
+    block.appendChild(row);
+  };
+
+  choose('shape', radar.shape === 'circle' ? 'circle' : 'polygon', [
+    ['polygon', 'polygon 多边形'],
+    ['circle', 'circle 圆形']
+  ]);
+
   box.appendChild(block);
 }
 
@@ -1031,9 +1057,25 @@ function buildDataEditor(box) {
       const line = document.createElement('div');
       line.className = 'data-row';
 
-      const label = document.createElement('span');
-      label.className = 'data-label';
-      label.textContent = row && typeof row === 'object' && row.name ? row.name : `#${ri + 1}`;
+      let label;
+
+      // radar 的系列名就是表格里的行名，改不了的话新加的行永远叫「系列 N」
+      if (indicators.length && entry.type === 'radar') {
+        label = document.createElement('input');
+        label.type = 'text';
+        label.className = 'data-label data-text';
+        label.value = String(entry.name || (row && row.name) || '');
+        label.addEventListener('input', () => {
+          entry.name = label.value;
+          if (row && typeof row === 'object' && !Array.isArray(row)) row.name = label.value;
+          refreshChart();
+          scheduleSync();
+        });
+      } else {
+        label = document.createElement('span');
+        label.className = 'data-label';
+        label.textContent = row && typeof row === 'object' && row.name ? row.name : `#${ri + 1}`;
+      }
 
       const group = document.createElement('div');
       group.className = 'data-values';
@@ -1733,7 +1775,8 @@ function buildPanel() {
 
     const tree = treeEntry();
     $('#count').textContent = tree ? String(flattenTree(treeRoots(tree.entry), 0, null).length) : '0';
-    $('#add').disabled = true;
+    // radar carries no nodes, but each series is still a row worth adding
+    $('#add').disabled = !radarSeriesAddable();
     return;
   }
 
@@ -1789,6 +1832,49 @@ function addNode() {
 
   state.nodes.push(node);
   selectOnly(node);
+
+  buildPanel();
+  refreshUI();
+  scheduleSync();
+}
+
+/** Radar has no scatter nodes, but its series are still rows the panel can add */
+function radarSeriesAddable() {
+  const radar = state.option && state.option.radar;
+  return Boolean(radar && Array.isArray(radar.indicator) && radar.indicator.length);
+}
+
+/** New radar series: every indicator starts at 0, so the row can be filled in place */
+function addRadarSeries() {
+  if (!radarSeriesAddable()) return;
+
+  pushHistory();
+
+  const series = Array.isArray(state.option.series) ? state.option.series : [];
+  const taken = new Set(series.map((entry) => String((entry && entry.name) || '')));
+
+  let n = series.length + 1;
+  while (taken.has('系列 ' + n)) n++;
+  const name = '系列 ' + n;
+
+  // 表格围栏的配色是构建时按系列顺序取的，这里跟着取同一个，预览才不会和文章对不上
+  const colors =
+    state.tableColors && state.tableColors.length
+      ? state.tableColors
+      : ['#4BACC6', '#E60000', '#A9C9E8', '#F79646', '#9BBB59', '#8064A2'];
+  const color = colors[series.length % colors.length];
+
+  series.push({
+    name,
+    type: 'radar',
+    symbol: 'none',
+    lineStyle: { color, width: 2 },
+    itemStyle: { color },
+    areaStyle: { color, opacity: 0.18 },
+    data: [{ value: state.option.radar.indicator.map(() => 0), name }]
+  });
+
+  state.option.series = series;
 
   buildPanel();
   refreshUI();
@@ -2122,6 +2208,7 @@ function applyData(data) {
     fenceIndex: data.fenceIndex || 0,
     nodeEditable: data.nodeEditable !== false,
     tableFence: data.tableFence === true,
+    tableColors: data.tableColors,
     tabFence: data.tabFence === true,
     strictJson: data.strictJson !== false,
     nodes: data.nodes,
@@ -2374,7 +2461,10 @@ function bindStatic() {
   $('#undo').addEventListener('click', undo);
   $('#redo').addEventListener('click', redo);
   $('#save').addEventListener('click', save);
-  $('#add').addEventListener('click', addNode);
+  $('#add').addEventListener('click', () => {
+    if (state.nodeEditable) addNode();
+    else addRadarSeries();
+  });
 
   bindFileModal();
 

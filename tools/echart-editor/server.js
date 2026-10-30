@@ -25,7 +25,13 @@ const http = require('http');
 const path = require('path');
 const vm = require('vm');
 const { execFile } = require('child_process');
-const { isTableFence, tableFenceOption, optionToTableFence, tabFence } = require('../../scripts/filters/echarts-table');
+const {
+  isTableFence,
+  tableFenceOption,
+  tableFenceColors,
+  optionToTableFence,
+  tabFence
+} = require('../../scripts/filters/echarts-table');
 
 // themes/butterfly/tools/echart-editor -> repo root (four levels up)
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
@@ -594,6 +600,7 @@ function loadChart(fenceIndex = 0) {
       nodes: nodesFromOption(option),
       nodeEditable: !tabs && seriesIndexOf(option, 'scatter') >= 0,
       tableFence: table,
+      tableColors: table ? tableFenceColors(fence.body) : undefined,
       tabFence: Boolean(tabs),
       fenceIndex: index,
       fences: fences.map((f) => ({ index: f.index, line: f.openLine + 1, heading: f.heading }))
@@ -1088,6 +1095,7 @@ function buildState(fenceIndex = 0) {
     })),
     nodeEditable: chart.nodeEditable !== false,
     tableFence: Boolean(chart.tableFence),
+    tableColors: chart.tableColors,
     tabFence: Boolean(chart.tabFence),
     // the blog's fence filter only accepts strict JSON; anything else is left as raw markdown
     strictJson: chart.kind === 'md' ? chart.tableFence || isStrictJson(chart) : true,
