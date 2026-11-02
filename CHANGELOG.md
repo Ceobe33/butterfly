@@ -8,6 +8,21 @@
 尚未发布的改动放在最上面，**按日期分组**：每个日期下再分 Added / Changed / Fixed，新的一天加在最上面。
 已发布的版本仍以版本号为节，节标题里带发布日期。日期取改动落地那天，不是写记录的日期。
 
+## 2026-11-01
+
+### Changed
+
+- **公式自动识别**：`scripts/filters/math-protect.js` 加了一个 priority 0 的 `before_post_render`，
+  正文里出现 `\(…\)` / `\[…\]` / `$$…$$` 就自动给文章打上 `mathjax: true`，不用每篇手写。
+  只认这三种定界符，**不认裸 `$`**（站内 `$` 多是薪资数字）；围栏代码块里的 `$$` 不算；
+  front-matter 已显式写了 `mathjax` / `katex` 的以作者为准。配合 `mathjax.enable: true`
+  （`per_page` 仍为 false，只有真有公式的页面才加载，全站 1508 个页面里只有 4 个）
+- 图表 **resize 防重画**：手机滚动时地址栏收起/展开会连续触发 `resize`，以前每次都把整页图表
+  全部 `resize()` 一遍，看起来是整页图一起闪。现在用 `requestAnimationFrame` 合并，并且只在容器
+  `clientWidth` 真变了才重画（地址栏只改高度），横竖屏切换照常自适应
+- 图表**明暗切换不再 dispose 重来**：记住上次渲染的明暗，变了就原地 `setOption(tune(…))` 重上色，
+  切换主题时不会再整页黑一下再画出来
+
 ## 2026-10-29
 
 ### Changed

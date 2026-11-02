@@ -183,6 +183,8 @@ const BOOT = `(function () {
     var chart = echarts.init(el)
     chart.setOption(tune(option, isDark()))
     el.__echarts = chart
+    el.__option = option
+    el.__echartsWidth = el.clientWidth
     charts.push(chart)
     return chart
   }
@@ -231,6 +233,17 @@ const BOOT = `(function () {
     })
   }
 
+  // 换浅色/深色：原地重上色，不 dispose —— 否则整页图会黑一下再画出来
+  var retint = function () {
+    var dark = isDark()
+
+    charts.forEach(function (chart) {
+      var el = chart.getDom()
+      if (!el || !el.__option) return
+      chart.setOption(tune(el.__option, dark))
+    })
+  }
+
   var boot = function () {
     load().then(render).catch(function (err) { console.error('[echarts]', err) })
   }
@@ -238,13 +251,35 @@ const BOOT = `(function () {
   document.addEventListener('DOMContentLoaded', boot)
   document.addEventListener('pjax:complete', boot)
 
-  // 切换浅色/深色主题时重绘
+  // 切换浅色/深色主题时重绘；明暗没真变就跳过（attribute 写回同值也会触发 observer）
+  var lastDark = isDark()
+
   new MutationObserver(function () {
-    if (window.echarts) render(window.echarts)
+    var dark = isDark()
+    if (dark === lastDark) return
+
+    lastDark = dark
+    if (window.echarts) retint()
   }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
+  // 手机地址栏收起/展开只改高度，宽度没变就没必要重画；一帧里来多少次也只处理一次
+  var resizePending = false
+
   window.addEventListener('resize', function () {
-    charts.forEach(function (c) { c.resize() })
+    if (resizePending) return
+    resizePending = true
+
+    requestAnimationFrame(function () {
+      resizePending = false
+
+      charts.forEach(function (chart) {
+        var el = chart.getDom()
+        if (!el || el.__echartsWidth === el.clientWidth) return
+
+        el.__echartsWidth = el.clientWidth
+        chart.resize({ animation: { duration: 0 } })
+      })
+    })
   })
 
   if (document.readyState !== 'loading') boot()

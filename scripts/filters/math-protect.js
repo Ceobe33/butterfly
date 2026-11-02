@@ -35,6 +35,26 @@ function restore (content, list) {
   })
 }
 
+/**
+ * 自动识别：正文里出现 \(…\) / \[…\] / $$…$$ 就给文章打上 mathjax 标记，
+ * 省得每篇都在 front-matter 手写一行。front-matter 显式写了 mathjax / katex（哪怕 false）就不管。
+ *
+ * 不认裸 $ —— 本站大量正文里的 $ 是薪资数字，认了会误伤。
+ */
+const AUTO_MATH_RE = /\\\(|\\\[|\$\$/
+const FENCE_BLOCK_RE = /(^|\n)(`{3,}|~{3,})[\s\S]*?\n\2/g
+
+hexo.extend.filter.register('before_post_render', data => {
+  if (data.mathjax !== undefined || data.katex !== undefined) return data
+  if (typeof data.content !== 'string' || !data.content) return data
+
+  // 代码块里的 $$ 是示例，不是公式
+  if (!AUTO_MATH_RE.test(data.content.replace(FENCE_BLOCK_RE, ''))) return data
+
+  data.mathjax = true
+  return data
+}, 0)
+
 hexo.extend.filter.register('before_post_render', data => {
   if (!data.mathjax && !data.katex) return data
   if (typeof data.content !== 'string' || !data.content) return data
